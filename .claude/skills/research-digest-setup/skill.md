@@ -78,15 +78,16 @@ If none, tell them you'll remove the weekly Research Databases section and just 
 
 "Do you want weekly NIH grant updates? If yes, which NIH institute(s) primarily fund your field? (NIMH, NHLBI, NIA, NCI, NLM, etc.)"
 
-### Q6. JCR / Impact Factor (optional)
+### Q6. Impact Factor data (optional)
 
-"Do you have institutional access to Clarivate JCR (Journal Citation Reports)? If yes, the pipeline can display IF tags in the email. If no, we skip this — pipeline still works."
+"Do you have a journal Impact Factor table? Most users get this from Clarivate JCR via their university library, but any CSV / Excel with ISSN + JIF columns works — the skill will auto-detect the schema. If no table, we skip this — pipeline still works."
 
-If they say yes and want to set it up now:
+If they have JCR access and want to pull fresh data:
 
 1. Tell them the URL: https://jcr.clarivate.com/jcr/browse-journals
 2. Walk them through: Sign In → institutional SSO → apply JIF filter (default ≥ 7) → Export the filtered list → save the CSV or Excel locally.
-3. In Phase 3 (ISSN whitelist section), ask for the file path. The skill will parse it automatically — they do NOT need to transform or clean the file first.
+
+If they already have a table from another source (library LibGuide, manually curated, older JCR export, Scimago, etc.): fine, Phase 3 will inspect columns and propose a mapping regardless of format.
 
 If they say no, unsure, or want to try later: leave `_ISSN_LIST = ""` and skip `jif_lookup.json`. IF tags won't render in the email, everything else works.
 
@@ -141,34 +142,55 @@ Replace `DB_ABCD`, `DB_EPIC_COSMOS`, `DB_ALL_OF_US` with the user's chosen datab
 
 If user has no databases, remove that section and keep only NIH RePORTER weekly.
 
-### ISSN whitelist + JIF lookup (skip entirely if no JCR)
+### ISSN whitelist + JIF lookup (skip entirely if no JIF table)
 
-If user has a JCR export file, parse it automatically. JCR's Export column names are fixed:
-
-| JCR column | What to extract |
-|------------|-----------------|
-| `ISSN` (and/or `eISSN`) | Used for `_ISSN_LIST` in `src/config.py` |
-| `2024 JIF` (or latest year column) | Used for `jif_lookup.json` values |
-| `Journal name` | Helpful for validation, not stored |
+Handle any JIF table robustly, regardless of source (JCR export, library-provided list, manually curated, Scimago export, etc.) — **do not assume a fixed schema**. Inspect columns, propose a mapping, confirm with the user.
 
 **Workflow when user provides the file:**
 
-1. Ask for the file path (e.g., `~/Downloads/jcr_export.csv` or `.xlsx`).
-2. Read the file using pandas (`pd.read_csv` or `pd.read_excel`).
-3. Ask user for JIF cutoff (default: 7).
-4. Filter rows: `JIF >= cutoff`.
-5. Build `_ISSN_LIST` = pipe-separated ISSNs (fall back to eISSN where ISSN is blank).
-6. Build `jif_lookup.json` = `{ISSN: JIF, ...}` (include eISSN as duplicate keys where present).
-7. Write both to the correct locations:
+1. Ask for the file path (e.g., `~/Downloads/jcr_export.csv`, `.xlsx`, `.tsv`).
+2. Load with pandas: `pd.read_csv` / `pd.read_excel` based on extension. If `.xlsx` has multiple sheets, list the sheet names and ask which to use.
+3. Show a short preview: column names + first 3 rows.
+4. Propose a column mapping using case-insensitive fuzzy matching:
+
+    | Target field | Column name patterns to try (in order) |
+    |--------------|----------------------------------------|
+    | ISSN | `issn`, `print issn`, `pissn`, `linking issn` |
+    | eISSN | `eissn`, `e-issn`, `online issn`, `electronic issn` |
+    | JIF | `jif`, `impact factor`, `journal impact factor`, any `YYYY jif` / `YYYY if` (prefer most recent year) |
+    | Journal name | `journal name`, `full title`, `title`, `journal title` |
+
+5. Present the proposal and ask user to confirm or correct:
+
+    ```
+    Proposed mapping:
+      ISSN         → "ISSN"
+      eISSN        → "eISSN"
+      JIF          → "2024 JIF"
+      Journal name → "Journal name"
+
+    Looks right? (yes / tell me which columns to use instead)
+    ```
+
+    **Shortcut:** if columns exactly match the canonical JCR Export (`ISSN`, `eISSN`, `2024 JIF`, `Journal name`), skip confirmation and state: "Detected standard JCR export, applying default mapping." Proceed.
+
+    **Ambiguity handling:** if two columns match the same field, or no column matches a required field (ISSN or JIF), ask user to point at the right one.
+
+6. Ask JIF cutoff (default: 7).
+7. Filter rows: `JIF >= cutoff`. Coerce non-numeric JIF to NaN and drop. Drop rows where both ISSN and eISSN are missing.
+8. Build outputs:
+    - `_ISSN_LIST`: pipe-separated ISSNs. Fall back to eISSN where ISSN is blank.
+    - `jif_lookup.json`: `{ISSN: JIF, eISSN: JIF, ...}`. Include both keys where both are present (downstream lookup tries both).
+9. Write:
     - `_ISSN_LIST` inline in `src/config.py` (edit the placeholder).
     - `jif_lookup.json` to `data/jif_lookup.json` (create if missing).
-8. Confirm counts back to user: "Wrote N ISSNs to whitelist, M JIF mappings to lookup."
+10. Confirm counts: "Parsed N journals → M keys in ISSN whitelist, K entries in JIF lookup."
 
 **Safety reminders after the write:**
-- Remind user: **do not commit `data/jif_lookup.json` or the populated `_ISSN_LIST`** if they plan to push the config back to a public repo. JCR data is not redistributable.
+- Remind user: **do not commit `data/jif_lookup.json` or the populated `_ISSN_LIST`** if the fork will stay public. JCR data is not redistributable.
 - Verify `.gitignore` includes `data/jif_lookup.json` before any `git add`.
 
-If user has no JCR export: leave both empty. Pipeline runs fine without them.
+If user has no JIF table: leave both empty. Pipeline runs fine without them.
 
 ## Phase 4: GitHub Actions secrets
 
