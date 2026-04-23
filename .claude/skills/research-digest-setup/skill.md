@@ -35,50 +35,141 @@ If `gh` is not installed, stop and tell them: `brew install gh && gh auth login`
 
 ## Phase 1: Gather research context
 
-Ask the user these questions, one at a time. Confirm each answer before moving on.
+Ask questions one at a time. Each question uses a **collect → validate → confirm** rhythm: gather keywords from the user, build a PubMed query, run `esearch.fcgi` against PubMed, show count + 5 sample titles via `esummary.fcgi`, then get sign-off before proceeding.
 
-### Q1. Research domain (required)
+**Smart defaults for AND/OR logic (do not ask the user when defaults obviously apply):**
+- Synonym group within a keyword module → **OR** (never ask — "cancer OR tumor OR oncology" is obviously union)
+- Topic + population or geographic constraint → **AND** (state the interpretation in one line when showing the validated query; user can override)
+- Topic × Methodology across axes → **AND** (never ask — near-universal)
 
-"What research domain do you work in? (e.g., psychiatry, cardiology, epidemiology, oncology)"
+**Only ask AND vs OR explicitly** when the user has 2+ independent modules on the **same axis** (e.g., two methodology modules — unclear whether intersection or union). In those cases, show both interpretations side-by-side with validated counts + samples, and let the user pick by example — never ask the abstract AND/OR question without showing results.
 
-Capture the keyword list they'd use to filter papers. Example:
+**Presentation (Flat vs Split subsections)** is a separate decision from logic. Split only applies under OR logic. Ask only after logic is confirmed.
 
-- Psychiatry → mental health, depression, anxiety, suicide, ADHD, bipolar, etc.
-- Cardiology → cardiovascular, heart failure, hypertension, arrhythmia, etc.
+**Never showcase this template's default research focus** (psychiatry, EHR, wearables, AI) as "recommended." They are one researcher's defaults, not best practices. Use generic examples (RCTs, cohort studies, survival analysis, machine learning) when illustrating categories.
 
-If they're unsure, offer to propose a starter list from their domain and iterate.
+### Q1. Topic focus (required)
 
-### Q2. Methods focus (required)
+Ask:
 
-"What methodology or data types do you most care about? Pick any subset:
-- EHR / clinical informatics
-- Wearables / sensor data
-- AI / ML / NLP
-- Digital phenotyping / EMA
-- Something else (causal inference, simulation, qualitative, etc.)"
+"What topic do you want to filter papers on? This can be:
+- A broad domain (e.g., oncology, cardiology, epidemiology)
+- A narrower subfield (e.g., breast cancer, heart failure)
+- A specific theme within a domain (e.g., oncology + nutrition, depression + inflammation)
+- Multiple related areas in combination
+- Any of the above with a population or geographic cut (e.g., pediatric oncology, US adult cardiology cohorts)
 
-They can pick 1-4. Each will become a subsection in Section 1 and Section 3.
+Describe it in plain English — I'll build a PubMed-compatible keyword module and verify it returns what you expect."
 
-### Q3. Top-tier journals in their field (required)
+After they describe the topic:
+
+1. Build a `TOPIC` keyword module: MeSH umbrella terms + `[tiab]` free-text synonyms. Use wildcards (`metasta*`) only when you are confident they resolve to well under 600 variants.
+2. If the user's description embedded a population/geographic cut (e.g., "pediatric oncology", "older adults"), build it as a separate `POPULATION` module and combine as `TOPIC AND POPULATION`.
+3. Run live validation: `esearch.fcgi?reldate=7` for count and IDs, then `esummary.fcgi` for 5 sample titles.
+4. Show the user:
+
+    ```
+    Proposed keyword modules:
+      TOPIC = <query block>
+      POPULATION = <query block>   (if applicable)
+
+    Validated against last 7 days of PubMed:
+      Count: N papers
+      Query translation: <echo what PubMed parsed>
+      Samples: <5 titles with journal names>
+
+    Interpretation: papers about <topic> in <population>  (TOPIC AND POPULATION)
+
+    Looks right?
+    ```
+
+5. Common adjustments the user may ask: narrow further (specific subtypes), exclude noise, expand with additional synonyms, swap out terms. Re-validate after each adjustment.
+
+### Q2. Methodology focus (optional — skip if no methodology filter)
+
+Ask:
+
+"Do you want to filter on specific methodologies? Skip if you care about topic alone and want any methodology. Methodology has two sub-axes — pick from either or both, or define your own:
+
+**Design** (what the study IS):
+- Study design: randomized controlled trials, cohort, case-control, cross-sectional, systematic review / meta-analysis
+- Data source: clinical trial data, electronic health records, registries, claims, imaging, administrative data
+
+**Analysis** (how analysis is done):
+- Regression modeling: linear, logistic, survival (Cox / hazard ratios), mixed-effects
+- Machine learning / prediction modeling
+- Causal inference: target trial emulation, IPTW, matching, instrumental variables
+- Longitudinal / latent-class / trajectory modeling
+- Meta-analysis / functional data / time-series
+
+List the categories that matter, or say **skip**. For each you list, I'll build a keyword module and validate it — ANDed with your confirmed TOPIC AND POPULATION filter."
+
+For each module the user provides:
+
+1. Build keywords: MeSH + `[tiab]` + `[Publication Type]` where relevant (e.g., `"Randomized Controlled Trial"[Publication Type]` for RCTs).
+2. Validate each module alone (intersected with TOPIC AND POPULATION) via `esearch.fcgi?reldate=30`. Fetch samples.
+3. Show each validated module with count + samples.
+
+### Q2b. Logic between methodology modules (only if 2+ modules)
+
+If user provided 2+ methodology modules, show both interpretations side by side:
+
+```
+Option A — AND (intersection): papers match all modules
+  Query: TOPIC AND POPULATION AND M1 AND M2
+  Validated (180d): N papers
+  Samples: ...
+
+Option B — OR (union): papers match any module
+  Query: TOPIC AND POPULATION AND (M1 OR M2)
+  Validated (30d): M papers
+  Samples: ...
+```
+
+"Which interpretation matches what you want?" Near-zero AND counts usually mean OR was intended. Pick by example, not abstract.
+
+### Q3. Section 1 structure (auto-infer when possible)
+
+Based on what was collected, infer Section 1's subsection structure:
+
+| Collected | Default structure | Ask user? |
+|-----------|-------------------|-----------|
+| 1 topic, 0 methods | 1 subsection: `TOPIC AND POP` | No |
+| 1 topic, 1 method | 1 subsection: `TOPIC AND POP AND M1` | No |
+| 1 topic, 2+ methods + AND logic | 1 subsection: `TOPIC AND POP AND M1 AND M2` | No |
+| 1 topic, 2+ methods + OR logic | **Ask:** Flat (one subsection `(M1 OR M2)`) vs Split (N subsections, each `Mi`) | Yes |
+| 2+ topics | Ask AND/OR (Q1-style side-by-side) then Flat/Split | Yes |
+
+Default recommendation when asking Flat vs Split: **Split**. Users who define independent methodologies typically want to track each as its own feed. If user hesitates, show what each subsection would contain.
+
+Show the final Section 1 structure as a confirmation table:
+
+```
+| Subsection    | Query                                              |
+| 1.1 × <name>  | TOPIC AND POP AND M1 AND <journal_whitelist>      |
+| 1.2 × <name>  | TOPIC AND POP AND M2 AND <journal_whitelist>      |
+```
+
+### Q4. Top-tier journals in their field (required)
 
 "Give me 5-15 top journals in your field. I'll split them into:
 - **General medical** (JAMA, Lancet, NEJM, BMJ, Nature Medicine, etc.)
-- **Domain-specific** (e.g., for psychiatry: Lancet Psychiatry, JAMA Psychiatry, Am J Psychiatry)
-- **Clinical informatics / digital health** (JAMIA, J Biomed Inform, npj Digit Med, etc.)"
+- **Domain-specific** (the flagship journals of your primary field)
+- **Methodological / cross-cutting** (e.g., if you care about methods papers — JCE, Stat Med, J Biomed Inform)"
 
-If they don't know, offer to suggest based on their domain.
+If they don't know, offer to suggest based on their topic from Q1.
 
-### Q4. Research databases to track weekly (optional)
+### Q5. Research databases to track weekly (optional)
 
-"Any specific research databases or cohorts you want to track weekly? (e.g., UK Biobank, All of Us, NHANES, MIMIC-III, ABCD Study, CPRD)"
+"Any specific research databases or cohorts you want to track weekly? (e.g., UK Biobank, All of Us, NHANES, MIMIC-III, ABCD Study, CPRD, SEER)"
 
-If none, tell them you'll remove the weekly Research Databases section and just keep NIH RePORTER weekly.
+If none, tell them you will remove the weekly Research Databases section and keep only NIH RePORTER weekly.
 
-### Q5. NIH RePORTER (optional)
+### Q6. NIH RePORTER (optional)
 
-"Do you want weekly NIH grant updates? If yes, which NIH institute(s) primarily fund your field? (NIMH, NHLBI, NIA, NCI, NLM, etc.)"
+"Do you want weekly NIH grant updates? If yes, which NIH institute(s) primarily fund your field? (NIMH, NHLBI, NIA, NCI, NLM, NIDDK, etc.)"
 
-### Q6. Impact Factor data (optional)
+### Q7. Impact Factor data (optional)
 
 "Do you have a journal Impact Factor table? Most users get this from Clarivate JCR via their university library, but any CSV / Excel with ISSN + JIF columns works — the skill will auto-detect the schema. If no table, we skip this — pipeline still works."
 
@@ -126,9 +217,14 @@ If renaming the variable, update all references in `ALERTS` too.
 
 ### Method modules
 
-For each methods focus the user picked, keep/edit the corresponding module (`EHR_METHODS`, `WEARABLES_METHODS`, `AI_METHODS`, `DIGITAL_PHENOTYPING_METHODS`). Remove any they don't want.
+The template ships with `EHR_METHODS`, `WEARABLES_METHODS`, `AI_METHODS`, `DIGITAL_PHENOTYPING_METHODS` as starter examples — these reflect one researcher's defaults, not a prescribed set. For each methodology module the user defined in Q2:
 
-If they want a new methods subsection, add a new module following the same pattern and reference it in `METHODS_SUBSECTIONS` and `ALERTS`.
+- **Reuse** a shipped module if keywords match (e.g., user defined an EHR filter → reuse `EHR_METHODS`).
+- **Rename + refill** a shipped module if the slot is unused (e.g., user wants an RCT filter → rename `WEARABLES_METHODS` → `RCT_METHODS` and replace keywords).
+- **Add** a new module following the same pattern for anything that doesn't match.
+- **Delete** unused shipped modules from `config.py` entirely — don't leave dangling references.
+
+Update `METHODS_SUBSECTIONS` and `ALERTS` to reference only the modules the user actually uses. Apply the Section 1 structure confirmed in Q3 (Flat vs Split, AND vs OR combinations).
 
 ### Journal whitelists
 
@@ -279,5 +375,7 @@ Once it works:
 - **Don't lecture about design** — they'll read DESIGN.md if curious. Focus on their setup.
 - **Never commit sensitive files** — verify `.gitignore` covers `data/jif_lookup.json`, `.env`, `sent_history.json` before any `git add`.
 - **Preserve user's custom edits** — if they've already edited `config.py`, merge your changes; don't overwrite.
-- **Concrete over abstract** — when asking about keywords or journals, always offer to propose a starter list if they're unsure.
-- **One email of friction > five emails of help** — minimize back-and-forth. Batch your questions when possible.
+- **Concrete over abstract** — when asking about keywords or journals, always offer to propose a starter list if they're unsure. Show validated queries with real counts and sample titles instead of asking abstract questions like "AND or OR?"
+- **Smart defaults over explicit asks** — only prompt for AND/OR logic when there are 2+ independent modules on the same axis. Never ask for defaults that obviously apply (synonym OR, topic×methodology AND, topic+population AND).
+- **Validation before proposal** — every keyword module proposed to the user must be live-validated against PubMed first (count + 5 sample titles). This prevents hallucinated MeSH terms and bad wildcards from reaching the user.
+- **Never showcase this template's defaults as recommended** — the template ships with one researcher's topic/methods as starter content. Treat them as placeholders, not best practice. Use domain-neutral examples (RCTs, cohort studies, Cox regression, machine learning) when illustrating categories.
