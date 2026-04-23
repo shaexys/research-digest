@@ -2,6 +2,8 @@
 
 One HTML email at 8am with new PubMed papers, preprints, and NIH grants — filtered to your research focus, delivered by GitHub Actions cron. Free, self-hosted, no SaaS account.
 
+> **This is a template.** It ships with psychiatry + clinical informatics defaults, but the structure is domain-agnostic. Fork it, then swap in your own topic, methods, keywords, and journal whitelists. See [Customization](#customization) for how.
+
 📖 **For the design rationale** (why 3 daily sections + 2 weekly, why bioRxiv uses AND but medRxiv uses OR, etc.): see [DESIGN.md](DESIGN.md).
 
 > *Screenshot: insert email preview here after first setup*
@@ -41,7 +43,7 @@ One HTML email at 8am with new PubMed papers, preprints, and NIH grants — filt
         └── Institute filter ∪ Methods keywords
 ```
 
-*Note: Section names above reflect the default template (psychiatry + clinical informatics). Rename freely when you fork — e.g., rename `PSYCH` → `CARDIO` and relabel "Psych × Methods" → "Cardio × Methods". See [Customization](#customization).*
+*Section names reflect the default template. Rename freely — e.g., "Psych × Methods" → "Cardio × Methods" or "Oncology × Methods". See [Customization](#customization).*
 
 - **Daily volume**: typically 20-60 papers total, triaged by reading titles and journal tags.
 - **Deduplication**: across sources (DOI + fuzzy title), across sections (higher-priority section wins), across a 7-day window.
@@ -61,40 +63,17 @@ You will need:
 | NCBI account → API key | Raises PubMed rate limit (recommended, not strictly required) | Yes (free) |
 | Destination email | Where the digest is delivered (can be the same Gmail or another inbox) | — |
 
-These data sources are queried via **public APIs** and need no account or key:
-
-- arXiv
-- medRxiv / bioRxiv
-- NIH RePORTER
+These data sources are queried via **public APIs** and need no account or key: arXiv, medRxiv / bioRxiv, NIH RePORTER.
 
 ---
 
-## Two ways to install
+## Install
 
-### 🛠 Track 1 — Fork + configure (10 minutes)
+Two paths, depending on how you like to work:
 
-For anyone comfortable with GitHub.
+### 🤖 Path A — Claude Code skill (recommended, ~5 min, conversational)
 
-1. Click **"Use this template"** at the top of this repo → create your own copy.
-2. Edit `src/config.py`:
-   - Replace domain keywords (`PSYCH`) with your topic keywords.
-   - Edit journal whitelists (`JOURNAL_TOP_MED`, `JOURNAL_TOP_PSYCH`, `JOURNAL_CLINICAL_INFORMATICS`) for your field.
-   - Optional: populate `_ISSN_LIST` for Section 1 breadth (see [DESIGN.md § ISSN Whitelist](DESIGN.md#issn-whitelist)).
-3. Get a Gmail app password:
-   - Google Account → Security → 2-Step Verification → App passwords → generate.
-4. Get an NCBI API key (improves PubMed rate limits):
-   - https://account.ncbi.nlm.nih.gov/settings/ → API Key Management.
-5. In your fork → Settings → Secrets and variables → Actions → add 4 repository secrets:
-   - `GMAIL_USER` — your sending Gmail address
-   - `GMAIL_APP_PASSWORD` — the app password from step 3
-   - `EMAIL_TO` — where you want the digest delivered
-   - `NCBI_API_KEY` — from step 4
-6. Actions tab → **Research Digest** workflow → "Run workflow" (manual trigger) to test.
-7. Check your inbox. Daily runs at 8am EST.
-
-### 🤖 Track 2 — Claude Code skill (5 minutes, conversational)
-
-If you use [Claude Code](https://claude.com/claude-code), this repo ships a companion setup skill.
+If you use [Claude Code](https://claude.com/claude-code), this repo ships a companion setup skill that walks you through everything in plain English — research context, forking, secrets, test run. No manual config editing required.
 
 ```bash
 # One-time install
@@ -108,56 +87,77 @@ Then in Claude Code:
 /research-digest-setup
 ```
 
-The skill will ask you about your research focus, help you fork this repo, set your secrets via `gh` CLI, and trigger the first test run.
+The skill handles: asking about your research focus, generating your `config.py`, forking this repo to your account, setting GitHub Actions secrets via `gh` CLI, and triggering the first test run. Designed for researchers who want results without editing Python.
+
+### 🛠 Path B — Fork + configure manually (~10 min)
+
+If you're comfortable with GitHub and Python, and want full control:
+
+1. Click **"Use this template"** at the top of this repo → create your own copy.
+2. Edit `src/config.py`:
+   - Replace the domain module (`PSYCH`) with your topic keywords. See [Customization § Domain](#domain).
+   - Edit or rename method modules to match your interests.
+   - Adjust journal whitelists for your field.
+   - Optional: populate `_ISSN_LIST` for Section 1 breadth (see [DESIGN.md § ISSN Whitelist](DESIGN.md#issn-whitelist)).
+3. Get a Gmail app password: Google Account → Security → 2-Step Verification → App passwords → generate.
+4. Get an NCBI API key at https://account.ncbi.nlm.nih.gov/settings/ → API Key Management.
+5. In your fork → Settings → Secrets and variables → Actions → add 4 repository secrets:
+   - `GMAIL_USER` — your sending Gmail address
+   - `GMAIL_APP_PASSWORD` — the app password from step 3
+   - `EMAIL_TO` — where you want the digest delivered
+   - `NCBI_API_KEY` — from step 4
+6. Actions tab → **Research Digest** workflow → "Run workflow" (manual trigger) to test.
+7. Check your inbox. Daily runs at 8am EST thereafter.
 
 ---
 
 ## Customization
 
-### Adapting to a non-psychiatry field
+Customization covers three axes: what your **domain** is, what **methods** you follow, and **other** pipeline behavior (schedule, databases, etc.).
 
-This template ships with default modules for psychiatry × clinical informatics. To repurpose for your field:
+You don't need to add anything new to customize — most users just **rename and edit** what's already there.
 
-1. Rename and rewrite the domain module. E.g., change `PSYCH = ...` in `src/config.py` to `CARDIO = '"Cardiovascular Diseases"[MeSH] OR ...'`.
-2. Edit or replace the methods subsections (`EHR_METHODS`, `WEARABLES_METHODS`, `AI_METHODS`, `DIGITAL_PHENOTYPING_METHODS`) with methods modules relevant to your work.
-3. Update the journal whitelists (`JOURNAL_TOP_MED` can stay; `JOURNAL_TOP_PSYCH` becomes `JOURNAL_TOP_CARDIO` or similar).
-4. Update `METHODS_SUBSECTIONS` and `ALERTS` to reference the renamed modules.
+### Domain
 
-The two-layer design (see [DESIGN.md § Two-layer module structure](DESIGN.md#1-two-layer-module-structure)) means you never touch the API code in `src/pubmed.py` etc. — only the config.
+**Change the topic the digest tracks.** The default is psychiatry; adapt to your field.
 
-### Adding a new methods module
+- **Keywords module:** rewrite `PSYCH` in `src/config.py` with your domain's MeSH + free-text terms. Rename the variable if you like (e.g., `PSYCH` → `CARDIO` / `NEURO` / `ONCO`). Update references in `ALERTS`.
+- **Top-tier domain journals:** edit `JOURNAL_TOP_PSYCH` with your field's leading journals. Rename the variable (e.g., `JOURNAL_TOP_CARDIO`). Update references in `_ALL_JOURNALS` and `ALERTS`.
+- **General-medical journals (`JOURNAL_TOP_MED`):** most default entries (JAMA, Lancet, NEJM, BMJ, Nature Medicine) stay relevant across fields. Edit if your field has different "general" outlets.
+- **Clinical informatics journals (`JOURNAL_CLINICAL_INFORMATICS`):** keep if you care about informatics / AI methodology papers regardless of domain; remove if not.
 
-Open `src/config.py` and add:
+### Methods
 
-```python
-CAUSAL_METHODS = (
-    '"Causal Inference"[MeSH] OR '
-    '"instrumental variable*"[tiab] OR '
-    '"propensity score"[tiab] OR ...'
-)
-```
+**Adjust which methodological lenses the pipeline tracks.** Each method is a subsection in Section 1 and Section 3.
 
-Then reference it in `METHODS_SUBSECTIONS` and in the `ALERTS` list. The API code in `src/pubmed.py` doesn't need changes — module composition is table-driven.
+- **Edit an existing method.** Each module (`EHR_METHODS`, `WEARABLES_METHODS`, `AI_METHODS`, `DIGITAL_PHENOTYPING_METHODS`) is just a keyword list. Tweak the terms directly — add, remove, or replace keywords.
+- **Remove a method you don't need.** Delete the module plus its entries in `METHODS_SUBSECTIONS` and `ALERTS`. The pipeline works with any number of method subsections (1 minimum).
+- **Add a new method.** Create a new module, e.g.:
+    ```python
+    CAUSAL_METHODS = (
+        '"Causal Inference"[MeSH] OR '
+        '"instrumental variable*"[tiab] OR '
+        '"propensity score"[tiab] OR ...'
+    )
+    ```
+    Then reference it in `METHODS_SUBSECTIONS` and `ALERTS`.
+- **Rename a method.** Same idea as domain — find and replace, update references.
 
-### Adding a new research database (weekly section)
+### Other
 
-Add to `DATABASE_KEYWORDS` and `ALERTS`. Keep queries specific (full database name in quotes) — broad terms drown the weekly section.
+**Schedule, databases, and section toggles.**
 
-### Changing the schedule
+- **Change delivery time.** Edit `.github/workflows/daily.yml`:
+    ```yaml
+    on:
+      schedule:
+        - cron: '0 13 * * *'  # 8am EST / 1pm UTC — cron uses UTC
+    ```
+- **Research Databases (weekly section).** Edit `DB_ABCD` / `DB_EPIC_COSMOS` / `DB_ALL_OF_US` in `src/config.py`, `DATABASE_KEYWORDS`, and `ALERTS`. Keep queries specific (full database name in quotes).
+- **NIH RePORTER institute filter.** `src/reporter.py` currently filters for NIMH. Change `agencies=["NIMH"]` to your funding agencies of interest (NHLBI, NCI, NIA, etc.).
+- **Disable a section entirely.** Remove the corresponding entries from `ALERTS`. For instance, remove all Section 2 entries if you don't want the general-domain section; remove the Sunday-only entries if you want daily only.
 
-Edit `.github/workflows/daily.yml`:
-
-```yaml
-on:
-  schedule:
-    - cron: '0 13 * * *'  # 8am EST / 1pm UTC
-```
-
-Adjust for your timezone. Note: cron uses UTC.
-
-### Trimming or expanding journals
-
-Journal whitelists live in `src/config.py`. Default lists are calibrated for psychiatry + clinical informatics; edit freely.
+The two-layer design (see [DESIGN.md § Two-layer module structure](DESIGN.md#1-two-layer-module-structure)) means customization never touches API code in `src/pubmed.py` / `src/medrxiv.py` / etc. — only `config.py` and occasionally `reporter.py`.
 
 ---
 
