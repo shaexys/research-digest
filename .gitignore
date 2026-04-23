@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+preview.html
+.env
+.DS_Store
+
+# Clarivate JCR-derived data — do not commit (licensing)
+data/jif_lookup.json
+
+# Cross-day dedup state
+sent_history.json

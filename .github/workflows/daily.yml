@@ -1,0 +1,42 @@
+name: Research Digest
+
+on:
+  schedule:
+    - cron: '0 13 * * *'  # Daily at 8am EST / 1pm UTC
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore dedup history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: sent_history.json
+          key: dedup-history-${{ github.run_id }}
+          restore-keys: dedup-history-
+
+      - name: Run pipeline
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+        run: python main.py
+
+      - name: Save dedup history cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: sent_history.json
+          key: dedup-history-${{ github.run_id }}
