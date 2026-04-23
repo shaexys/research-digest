@@ -1,6 +1,6 @@
 # Research Digest — Design
 
-A lightweight, opinionated pipeline for daily literature discovery. One HTML email in your inbox at 8am with new PubMed papers, preprints, and NIH grants, filtered to your research focus.
+A lightweight, opinionated pipeline for literature discovery. Daily PubMed papers and preprints at 8am; weekly NIH grants and database-cohort papers on Sundays. One HTML email, filtered to your research focus.
 
 This document explains **why** the pipeline is structured the way it is. If you want to install and run it, see the [README](README.md). If you want to understand the design tradeoffs so you can adapt it, read on.
 

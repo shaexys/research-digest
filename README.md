@@ -1,6 +1,6 @@
 # Research Digest
 
-One HTML email at 8am with new PubMed papers, preprints, and NIH grants — filtered to your research focus, delivered by GitHub Actions cron. Free, self-hosted, no SaaS account.
+Daily PubMed papers and preprints at 8am; weekly NIH grants and database-cohort papers on Sundays. One HTML email, filtered to your research focus. Delivered by GitHub Actions cron — free, self-hosted, no SaaS account.
 
 > **This is a template.** It ships with psychiatry + clinical informatics defaults, but the structure is domain-agnostic. Fork it, then swap in your own topic, methods, keywords, and journal whitelists. See [Customization](#customization) for how.
 
