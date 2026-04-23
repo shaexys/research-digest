@@ -6,7 +6,9 @@ One HTML email at 8am with new PubMed papers, preprints, and NIH grants — filt
 
 📖 **For the design rationale** (why 3 daily sections + 2 weekly, why bioRxiv uses AND but medRxiv uses OR, etc.): see [DESIGN.md](DESIGN.md).
 
-![Daily digest email preview — three sections of curated papers, with journal / IF / institution tags](docs/email-preview.png)
+<p align="center">
+  <img src="docs/email-preview.png" width="500" alt="Daily digest email preview — three sections of curated papers, with journal / IF / institution tags">
+</p>
 
 ---
 
