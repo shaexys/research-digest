@@ -2,7 +2,8 @@ name: Research Digest
 
 on:
   schedule:
-    - cron: '0 13 * * *'  # Daily at 8am EST / 1pm UTC
+    - cron: '0 11 * * *'   # 7am EDT / 6am EST — primary
+    - cron: '30 11 * * *'  # 7:30am EDT / 6:30am EST — backup if primary cancelled by runner pool; dedup prevents duplicate emails
   workflow_dispatch:       # Manual trigger
 
 jobs:
