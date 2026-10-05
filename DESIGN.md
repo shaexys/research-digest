@@ -156,11 +156,13 @@ PubMed's E-utilities accept queries via two HTTP methods: **GET** (query in URL)
 
 POST has no meaningful length limit on the body, so the pipeline uses POST throughout. Practical effect: your whitelist can grow to tens of thousands of ISSNs without breaking anything.
 
-### 3. bioRxiv uses AND logic; medRxiv uses OR
+### 3. All preprint servers use AND logic
 
-medRxiv is medicine-focused: base rate of wet lab noise is low. OR logic (any match to domain OR methods keywords) yields manageable volume (~4/day).
+Preprints only feed Section 1 (Psych × Methods), so every preprint must match a domain keyword AND a methods keyword.
 
 bioRxiv is biology-dominant: ~80% of OR-matched papers are molecular wet lab work. AND logic (topic × method both required) cuts volume from ~74/day to ~8/day, mostly relevant.
+
+medRxiv originally used OR on the assumption that a medicine-focused server has little noise. Measured 2026-10-05, OR matched 45 papers in one day, most of them methods-only (influenza, hepatitis, oncology) and filed under Psych × Methods, so medRxiv now uses AND as well.
 
 ### 4. arXiv: category filter in API, keyword filter locally
 

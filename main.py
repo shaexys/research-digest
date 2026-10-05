@@ -137,12 +137,15 @@ def main():
     # ---------------------------------------------------------------------------
     # Step 2: Fetch preprints (daily only)
     # ---------------------------------------------------------------------------
-    # For medRxiv: match any keyword (broader — medRxiv is already clinical)
-    MEDRXIV_KEYWORDS = PSYCH_KEYWORDS + ALL_METHODS_KEYWORDS
-
+    # medRxiv, bioRxiv and arXiv all require psych AND methods: preprints feed only
+    # Section 1 (Psych x Methods). medRxiv used OR until 2026-10-05, which let
+    # methods-only papers (influenza, hepatitis, oncology) into Section 1.
     print("  Searching: medRxiv preprints")
     try:
-        medrxiv_articles = medrxiv.search("medrxiv", days_back=daily_days, keywords=MEDRXIV_KEYWORDS)
+        medrxiv_articles = medrxiv.search(
+            "medrxiv", days_back=daily_days, keywords=[],
+            require_both=(PSYCH_KEYWORDS, ALL_METHODS_KEYWORDS),
+        )
         print(f"    Found {len(medrxiv_articles)} matching preprints")
     except Exception as e:
         print(f"    medRxiv search failed ({e}), skipping")
