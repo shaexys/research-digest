@@ -6,6 +6,9 @@ on:
     - cron: '30 11 * * *'  # 7:30am EDT / 6:30am EST — backup if primary cancelled by runner pool; dedup prevents duplicate emails
   workflow_dispatch:       # Manual trigger
 
+permissions:
+  contents: write  # keepalive commit
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -41,3 +44,14 @@ jobs:
         with:
           path: sent_history.json
           key: dedup-history-${{ github.run_id }}
+
+      # GitHub disables scheduled workflows after 60 days without repo commits (happened 2026-07-05)
+      - name: Monthly keepalive commit
+        if: github.event.schedule == '0 11 * * *' && always()
+        run: |
+          if [ "$(date -u +%d)" = "01" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keepalive (prevent scheduled-workflow auto-disable)"
+            git push
+          fi
