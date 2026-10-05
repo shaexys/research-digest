@@ -141,7 +141,11 @@ def _parse_xml(xml_text: str) -> list[dict]:
 
         # ISSNs (for Impact Factor lookup): keep print and electronic, since a
         # JIF table may list a journal under either one
+        # PubMed lists one ISSN under Journal and the linking ISSN separately
         issns = [el.text.strip() for el in art.findall("Journal/ISSN") if el.text]
+        linking = medline.findtext("MedlineJournalInfo/ISSNLinking", "").strip()
+        if linking and linking not in issns:
+            issns.append(linking)
         issn = issns[0] if issns else ""
 
         # Date — try ArticleDate first, then PubDate

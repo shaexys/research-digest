@@ -195,13 +195,15 @@ def main():
     # ---------------------------------------------------------------------------
     if is_sunday:
         for db_name, db_keywords in config.DATABASE_KEYWORDS.items():
-            try:
-                db_medrxiv = medrxiv.search("medrxiv", days_back=7, keywords=db_keywords)
-                db_biorxiv = medrxiv.search("biorxiv", days_back=7, keywords=db_keywords)
-            except Exception as e:
-                print(f"    Weekly preprint search failed for {db_name} ({e}), skipping")
-                failed.append(f"preprints: {db_name}")
-                continue
+            db_found = {}
+            for server, label in (("medrxiv", "medRxiv"), ("biorxiv", "bioRxiv")):
+                try:
+                    db_found[server] = medrxiv.search(server, days_back=7, keywords=db_keywords)
+                except Exception as e:
+                    print(f"    Weekly {label} search failed for {db_name} ({e}), skipping")
+                    failed.append(f"{label} ({db_name})")
+                    db_found[server] = []
+            db_medrxiv, db_biorxiv = db_found["medrxiv"], db_found["biorxiv"]
 
             db_preprints = db_medrxiv + db_biorxiv
             if db_name in all_articles and db_preprints:
@@ -282,8 +284,14 @@ def main():
     total = sum(len(v["articles"]) for v in all_articles.values())
     print(f"Total articles after dedup: {total}")
 
-    if total == 0:
+    if total == 0 and not failed:
         print("No articles found. Skipping email.")
+        return
+    if total == 0:
+        # Nothing to list, but say which sources failed rather than send nothing
+        html = email_format.failure_notice(date_str, failed)
+        if os.environ.get("GMAIL_APP_PASSWORD"):
+            send.send_email(html, f"\u26a0\ufe0f {date_str}: sources failed")
         _exit_if_failed(failed)
         return
 

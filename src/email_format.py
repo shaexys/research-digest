@@ -42,6 +42,15 @@ def jif_for(art: dict) -> float:
     return max((_JIF_LOOKUP.get(i, 0.0) for i in issns if i), default=0.0)
 
 
+def failure_notice(date_str: str, failed_sources: list[str]) -> str:
+    """Minimal email for a day when sources failed and nothing else was found."""
+    items = "".join(f"<li>{s}</li>" for s in failed_sources)
+    return (f"<html><body style=\"font-family: Helvetica, Arial, sans-serif\">"
+            f"<p>Research digest {date_str}: no articles to send, and these sources failed:</p>"
+            f"<ul>{items}</ul><p>Rerun the workflow with days_back=2 tomorrow to recover the window.</p>"
+            f"</body></html>")
+
+
 def build(all_articles: dict[str, dict], date_str: str,
           failed_sources: list[str] | None = None) -> str:
     """Build a single HTML email from all alert results.

@@ -17,9 +17,11 @@ CATEGORIES = ["cs.AI", "cs.CL", "cs.LG", "stat.ML", "cs.HC"]
 # Whole-word forms of every stem in main.PSYCH_KEYWORDS, so the API pre-filter is
 # no narrower than the local psych filter applied afterwards.
 DEFAULT_API_TERMS = [
-    "psychiatry", "psychiatric", "mental health", "mental disorder", "mental disorders",
-    "depression", "depressive", "anxiety", "PTSD", "suicide", "suicidal", "self-harm",
+    "psychiatry", "psychiatric", "psychiatrist", "mental health", "mental disorder", "mental disorders",
+    "depression", "depressive", "depressed", "anxiety", "PTSD",
+    "suicide", "suicidal", "suicidality", "self-harm",
     "ADHD", "bipolar", "internalizing", "externalizing", "psychopathology",
+    "psychopathological",
 ]
 
 

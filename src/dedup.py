@@ -81,14 +81,17 @@ def load_history() -> dict:
             history = json.load(f)
         if not isinstance(history.get("articles"), dict):
             raise ValueError("missing 'articles' mapping")
+        if not all(isinstance(v, str) for v in history["articles"].values()):
+            raise ValueError("non-string date in 'articles'")
         return history
     except (json.JSONDecodeError, OSError, ValueError, AttributeError) as e:
         aside = HISTORY_FILE.replace(".json", ".corrupt.json")
         try:
             os.replace(HISTORY_FILE, aside)
-        except OSError:
-            pass
-        raise HistoryCorrupt(f"{e}; moved to {os.path.basename(aside)}") from e
+            where = f"moved to {os.path.basename(aside)}"
+        except OSError as move_err:
+            where = f"could not be moved aside ({move_err})"
+        raise HistoryCorrupt(f"{e}; {where}") from e
 
 
 def _empty_history() -> dict:
