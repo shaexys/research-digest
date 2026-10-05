@@ -29,14 +29,15 @@ def search(keywords: list[str], fiscal_years: list[int] = None,
 
     Args:
         keywords: search terms for Methods (OR logic)
-        fiscal_years: fiscal years to search (default: current year)
+        fiscal_years: fiscal years to search (default: previous + current NIH
+            fiscal year; see current_fiscal_years)
         nimh_all: if True, also fetch all NIMH grants without keyword filter
 
     Returns:
         List of grant dicts, with wet lab grants filtered out, deduplicated.
     """
     if fiscal_years is None:
-        fiscal_years = [date.today().year]
+        fiscal_years = current_fiscal_years()
 
     all_results = {}
 
@@ -46,7 +47,7 @@ def search(keywords: list[str], fiscal_years: list[int] = None,
             "advanced_text_search": {
                 "operator": "or",
                 "search_field": "projecttitle,terms",
-                "search_text": " ".join(keywords),
+                "search_text": _or_text(keywords),
             },
             "fiscal_years": fiscal_years,
             "newly_added_projects_only": True,
@@ -74,12 +75,68 @@ def search(keywords: list[str], fiscal_years: list[int] = None,
     return results
 
 
+def current_fiscal_years(today: date | None = None) -> list[int]:
+    """Previous and current NIH fiscal year. The NIH fiscal year starts on
+    October 1, so from October onward the current FY is next calendar year.
+    Both are queried because new FY awards arrive slowly in the autumn
+    (2026-10-05: newly added FY2026 = 766, FY2027 = 0)."""
+    today = today or date.today()
+    fy = today.year + 1 if today.month >= 10 else today.year
+    return [fy - 1, fy]
+
+
+def _or_text(keywords: list[str]) -> str:
+    """Join keywords for an OR search, quoting multi-word phrases so each
+    phrase is matched as a phrase rather than as separate words
+    ("electronic health record": 40,575 hits unquoted vs 1,863 quoted)."""
+    return " ".join(f'"{kw}"' if " " in kw.strip() else kw for kw in keywords)
+
+
+PAGE_SIZE = 500     # API maximum per request
+MAX_OFFSET = 14999  # API refuses offsets beyond this
+
+
 def _fetch_and_filter(criteria: dict) -> list[dict]:
-    """Fetch grants from API and filter out wet lab."""
+    """Fetch every page of grants from the API and filter out wet lab."""
+    projects: list[dict] = []
+    offset = 0
+    while True:
+        data = _fetch_page(criteria, offset)
+        page = data.get("results", [])
+        projects.extend(page)
+        total = int((data.get("meta") or {}).get("total", 0))
+        offset += len(page)
+        if not page or offset >= total:
+            break
+        if offset > MAX_OFFSET:
+            print(f"    RePORTER: {total} matches exceed the API paging limit; kept the first {offset}")
+            break
+
+    # Build exclusion patterns
+    exclude_pats = [re.compile(re.escape(t), re.IGNORECASE) for t in WET_LAB_TERMS]
+
+    results = []
+    for proj in projects:
+        # Check title + terms for wet lab signals
+        title = proj.get("project_title") or ""
+        terms = proj.get("terms", "") or ""
+        abstract = proj.get("abstract_text", "") or ""
+        text = f"{title} {terms} {abstract}"
+
+        if any(pat.search(text) for pat in exclude_pats):
+            continue
+
+        results.append(_to_article(proj))
+
+    return results
+
+
+def _fetch_page(criteria: dict, offset: int) -> dict:
+    """POST one page of the search, retrying transient errors."""
     payload = {
         "criteria": criteria,
-        "offset": 0,
-        "limit": 100,
+        "offset": offset,
+        "limit": PAGE_SIZE,
         "sort_field": "project_start_date",
         "sort_order": "desc",
     }
@@ -101,32 +158,14 @@ def _fetch_and_filter(criteria: dict) -> list[dict]:
     if resp is None:
         raise requests.exceptions.ConnectionError("NIH RePORTER API unreachable after 3 attempts")
     resp.raise_for_status()
-    data = resp.json()
-
-    # Build exclusion patterns
-    exclude_pats = [re.compile(re.escape(t), re.IGNORECASE) for t in WET_LAB_TERMS]
-
-    results = []
-    for proj in data.get("results", []):
-        # Check title + terms for wet lab signals
-        title = proj.get("project_title", "")
-        terms = proj.get("terms", "") or ""
-        abstract = proj.get("abstract_text", "") or ""
-        text = f"{title} {terms} {abstract}"
-
-        if any(pat.search(text) for pat in exclude_pats):
-            continue
-
-        results.append(_to_article(proj))
-
-    return results
+    return resp.json()
 
 
 def _to_article(proj: dict) -> dict:
     """Convert RePORTER project to standard article dict."""
     pi_names = []
-    for pi in proj.get("principal_investigators", []):
-        name = pi.get("full_name", "").strip()
+    for pi in proj.get("principal_investigators") or []:  # null on some records
+        name = (pi.get("full_name") or "").strip()
         if name:
             pi_names.append(name.title())
 
@@ -134,11 +173,11 @@ def _to_article(proj: dict) -> dict:
     if len(pi_names) > 3:
         pi_str += ", et al."
 
-    project_num = proj.get("project_num", "")
-    title = proj.get("project_title", "").strip()
+    project_num = proj.get("project_num") or ""
+    title = (proj.get("project_title") or "").strip()
 
     # Activity code (R01, K99, etc.) - extract from project number
-    activity_code = proj.get("activity_code", "")
+    activity_code = proj.get("activity_code") or ""
     if not activity_code and project_num:
         # Project number format: 5R01MH123456-02
         parts = project_num.split("-")[0] if "-" in project_num else project_num
@@ -149,7 +188,7 @@ def _to_article(proj: dict) -> dict:
             activity_code = match.group(1)
 
     # Institution in title case
-    org = proj.get("organization", {}).get("org_name", "")
+    org = (proj.get("organization") or {}).get("org_name") or ""
     if org:
         org = org.title()
 

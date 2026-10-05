@@ -6,6 +6,8 @@ from datetime import date, timedelta
 
 import requests
 
+from src.keywords import compile_all, matches_any
+
 BASE = "https://api.medrxiv.org/details"
 
 
@@ -64,21 +66,20 @@ def search(server: str, days_back: int, keywords: list[str],
         if cursor >= total:
             break
 
-    # Local keyword filter
+    # Local keyword filter (acronyms match whole words only; see src/keywords.py)
+    matched = []
     if require_both:
-        pats_a = [re.compile(re.escape(kw), re.IGNORECASE) for kw in require_both[0]]
-        pats_b = [re.compile(re.escape(kw), re.IGNORECASE) for kw in require_both[1]]
-        matched = []
+        pats_a = compile_all(require_both[0])
+        pats_b = compile_all(require_both[1])
         for p in all_papers:
             text = f"{p.get('title', '')} {p.get('abstract', '')}"
-            if any(pa.search(text) for pa in pats_a) and any(pb.search(text) for pb in pats_b):
+            if matches_any(text, pats_a) and matches_any(text, pats_b):
                 matched.append(_to_article(p, server))
     else:
-        patterns = [re.compile(re.escape(kw), re.IGNORECASE) for kw in keywords]
-        matched = []
+        patterns = compile_all(keywords)
         for p in all_papers:
             text = f"{p.get('title', '')} {p.get('abstract', '')}"
-            if any(pat.search(text) for pat in patterns):
+            if matches_any(text, patterns):
                 matched.append(_to_article(p, server))
 
     return matched
@@ -107,4 +108,6 @@ def _to_article(p: dict, server: str) -> dict:
         "issn": "",
         "url": f"https://doi.org/{doi}" if doi else "",
         "institution": institution,
+        # Kept so classify_preprints can read the abstract, not just the title
+        "abstract": (p.get("abstract") or "").strip(),
     }

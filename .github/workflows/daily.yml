@@ -5,18 +5,30 @@ on:
     - cron: '0 11 * * *'   # 7am EDT / 6am EST — primary
     - cron: '30 11 * * *'  # 7:30am EDT / 6:30am EST — backup if primary cancelled by runner pool; dedup prevents duplicate emails
   workflow_dispatch:       # Manual trigger
+    inputs:
+      days_back:
+        description: 'Days to look back (use 2+ to recover a missed day; already-sent items are skipped)'
+        required: false
+        default: '1'
+
+# The backup cron waits for the primary instead of racing it on the dedup cache.
+concurrency:
+  group: research-digest
+  cancel-in-progress: false
 
 permissions:
-  contents: write  # keepalive commit
+  contents: read
 
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -24,11 +36,21 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Restore dedup history cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: sent_history.json
           key: dedup-history-${{ github.run_id }}
           restore-keys: dedup-history-
+
+      # Journal-ranking data (Clarivate JCR) is licensed, so it never enters the
+      # repo: it lives in Actions secrets and is written to gitignored files here.
+      - name: Write JCR-derived data from secrets
+        env:
+          JIF_LOOKUP_JSON: ${{ secrets.JIF_LOOKUP_JSON }}
+        run: |
+          if [ -n "$JIF_LOOKUP_JSON" ]; then
+            printf '%s' "$JIF_LOOKUP_JSON" > data/jif_lookup.json
+          fi
 
       - name: Run pipeline
         env:
@@ -36,18 +58,29 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+          ISSN_WHITELIST: ${{ secrets.ISSN_WHITELIST }}
+          DAYS_BACK: ${{ github.event.inputs.days_back }}
         run: python main.py
 
+      # Saved even when the run fails: main.py writes history right after a
+      # successful send, before it exits non-zero for a failed source.
       - name: Save dedup history cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always()
         with:
           path: sent_history.json
           key: dedup-history-${{ github.run_id }}
 
-      # GitHub disables scheduled workflows after 60 days without repo commits (happened 2026-07-05)
+  # GitHub disables scheduled workflows after 60 days without repo commits
+  # (happened 2026-07-05). Only this job may write to the repo.
+  keepalive:
+    if: github.event.schedule == '0 11 * * *'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
       - name: Monthly keepalive commit
-        if: github.event.schedule == '0 11 * * *' && always()
         run: |
           if [ "$(date -u +%d)" = "01" ]; then
             git config user.name "github-actions[bot]"

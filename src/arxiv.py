@@ -7,13 +7,24 @@ from datetime import date, timedelta
 
 import requests
 
+from src.keywords import compile_all, matches_any
+
 BASE = "http://export.arxiv.org/api/query"
 
 # arXiv categories relevant to methods in psychiatry
 CATEGORIES = ["cs.AI", "cs.CL", "cs.LG", "stat.ML", "cs.HC"]
 
+# Whole-word forms of every stem in main.PSYCH_KEYWORDS, so the API pre-filter is
+# no narrower than the local psych filter applied afterwards.
+DEFAULT_API_TERMS = [
+    "psychiatry", "psychiatric", "mental health", "mental disorder", "mental disorders",
+    "depression", "depressive", "anxiety", "PTSD", "suicide", "suicidal", "self-harm",
+    "ADHD", "bipolar", "internalizing", "externalizing", "psychopathology",
+]
 
-def search(days_back: int, require_both: tuple[list[str], list[str]]) -> list[dict]:
+
+def search(days_back: int, require_both: tuple[list[str], list[str]],
+           api_terms: list[str] | None = None) -> list[dict]:
     """Search arXiv for recent papers matching psych AND methods keywords.
 
     Uses arXiv API with category filter + broad keyword search,
@@ -22,6 +33,9 @@ def search(days_back: int, require_both: tuple[list[str], list[str]]) -> list[di
     Args:
         days_back: how many days back to include
         require_both: (psych_keywords, methods_keywords)
+        api_terms: whole-word phrases sent to the arXiv API (the API does not
+            stem, so the stemmed local keywords cannot be sent as they are).
+            Defaults to DEFAULT_API_TERMS.
 
     Returns:
         List of article dicts.
@@ -31,11 +45,7 @@ def search(days_back: int, require_both: tuple[list[str], list[str]]) -> list[di
     # Build search queries per psych keyword across all categories
     cat_query = " OR ".join(f"cat:{c}" for c in CATEGORIES)
 
-    # Use a few high-signal psych terms in the API query to reduce volume
-    api_terms = [
-        "mental health", "psychiatry", "depression", "anxiety",
-        "ADHD", "suicide", "PTSD", "psychopathology",
-    ]
+    api_terms = api_terms or DEFAULT_API_TERMS
     ti_query = " OR ".join(f'ti:"{t}"' for t in api_terms)
     abs_query = " OR ".join(f'abs:"{t}"' for t in api_terms)
     query = f"({cat_query}) AND ({ti_query} OR {abs_query})"
@@ -89,13 +99,13 @@ def search(days_back: int, require_both: tuple[list[str], list[str]]) -> list[di
     recent = [e for e in all_entries if e["date"] >= cutoff.isoformat()]
 
     # Filter by require_both: psych AND methods
-    pats_a = [re.compile(re.escape(kw), re.IGNORECASE) for kw in require_both[0]]
-    pats_b = [re.compile(re.escape(kw), re.IGNORECASE) for kw in require_both[1]]
+    pats_a = compile_all(require_both[0])
+    pats_b = compile_all(require_both[1])
 
     matched = []
     for p in recent:
         text = f"{p['title']} {p['abstract']}"
-        if any(pa.search(text) for pa in pats_a) and any(pb.search(text) for pb in pats_b):
+        if matches_any(text, pats_a) and matches_any(text, pats_b):
             matched.append(_to_article(p))
 
     return matched
@@ -157,4 +167,6 @@ def _to_article(p: dict) -> dict:
         "doi": "",
         "issn": "",
         "url": p["link"],
+        # Kept so classify_preprints can read the abstract, not just the title
+        "abstract": p["abstract"],
     }

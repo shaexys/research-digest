@@ -3,25 +3,11 @@
 import datetime
 import json
 import os
+import sys
 from collections import OrderedDict
 
 from src import config, pubmed, dedup, email_format, send, medrxiv, arxiv, reporter
-
-# ---------------------------------------------------------------------------
-# Impact Factor lookup for sorting
-# ---------------------------------------------------------------------------
-_JIF_LOOKUP: dict[str, float] = {}
-
-
-def _load_jif():
-    """Load JIF lookup from data file."""
-    global _JIF_LOOKUP
-    if _JIF_LOOKUP:
-        return
-    path = os.path.join(os.path.dirname(__file__), "data", "jif_lookup.json")
-    if os.path.exists(path):
-        with open(path) as f:
-            _JIF_LOOKUP = json.load(f)
+from src.keywords import compile_all, matches_any
 
 # ---------------------------------------------------------------------------
 # Preprint Keywords (for filtering medRxiv/bioRxiv/arXiv)
@@ -87,11 +73,25 @@ def main():
     is_sunday = today.weekday() == 6
     date_str = today.strftime("%Y-%m-%d")
 
-    # Load JIF lookup for IF sorting
-    _load_jif()
+    # Manual reruns (workflow_dispatch input) can widen the window to recover a
+    # missed day; history still suppresses anything already sent.
+    override = os.environ.get("DAYS_BACK", "").strip()
+    days_override = int(override) if override.isdigit() and int(override) > 0 else None
+    if days_override:
+        print(f"DAYS_BACK override: daily window = {days_override} day(s)")
+    daily_days = days_override or 1
+
+    # Every source that errors is recorded here, named in the email banner, and
+    # turns the run red (exit 1) so GitHub sends a failure notice.
+    failed: list[str] = []
 
     # Load history for cross-day dedup
-    history = dedup.load_history()
+    try:
+        history = dedup.load_history()
+    except dedup.HistoryCorrupt as e:
+        print(f"  Dedup history unreadable ({e}); continuing with empty history")
+        failed.append("dedup history (repeats possible)")
+        history = {"articles": {}, "last_cleanup": None}
     history = dedup.cleanup_old_history(history)
     print(f"Loaded history: {len(history.get('articles', {}))} articles from past 7 days")
 
@@ -109,14 +109,22 @@ def main():
     # ---------------------------------------------------------------------------
     all_articles: OrderedDict[str, dict] = OrderedDict()
     for alert in active:
-        print(f"  Searching: {alert['name']} (days_back={alert['days_back']})")
+        days = max(alert["days_back"], days_override or 0)
+        print(f"  Searching: {alert['name']} (days_back={days})")
         try:
-            pmids = pubmed.search(alert["query"], days_back=alert["days_back"])
+            pmids = pubmed.search(alert["query"], days_back=days)
             print(f"    Found {len(pmids)} PMIDs")
             articles = pubmed.fetch(pmids)
             print(f"    Fetched {len(articles)} articles")
+            if alert.get("issn_query") and config.ISSN_SET:
+                # Whitelist journals: search without a journal filter, keep by ISSN
+                extra = pubmed.fetch(pubmed.search(alert["issn_query"], days_back=days))
+                kept = [a for a in extra if config.ISSN_SET & set(a.get("issns") or [])]
+                print(f"    ISSN whitelist: {len(kept)} of {len(extra)} unfiltered articles kept")
+                articles.extend(kept)
         except Exception as e:
             print(f"    PubMed search failed for {alert['name']} ({e}), skipping")
+            failed.append(f"PubMed: {alert.get('display_name', alert['name'])}")
             articles = []
         all_articles[alert["name"]] = {
             "articles": articles,
@@ -134,32 +142,35 @@ def main():
 
     print("  Searching: medRxiv preprints")
     try:
-        medrxiv_articles = medrxiv.search("medrxiv", days_back=1, keywords=MEDRXIV_KEYWORDS)
+        medrxiv_articles = medrxiv.search("medrxiv", days_back=daily_days, keywords=MEDRXIV_KEYWORDS)
         print(f"    Found {len(medrxiv_articles)} matching preprints")
     except Exception as e:
         print(f"    medRxiv search failed ({e}), skipping")
+        failed.append("medRxiv")
         medrxiv_articles = []
 
     print("  Searching: bioRxiv preprints")
     try:
         biorxiv_articles = medrxiv.search(
-            "biorxiv", days_back=1, keywords=[],
+            "biorxiv", days_back=daily_days, keywords=[],
             require_both=(PSYCH_KEYWORDS, ALL_METHODS_KEYWORDS),
         )
         print(f"    Found {len(biorxiv_articles)} matching preprints")
     except Exception as e:
         print(f"    bioRxiv search failed ({e}), skipping")
+        failed.append("bioRxiv")
         biorxiv_articles = []
 
     print("  Searching: arXiv (cs.AI, cs.CL, cs.LG, stat.ML, cs.HC)")
     try:
         arxiv_articles = arxiv.search(
-            days_back=1,
+            days_back=daily_days,
             require_both=(PSYCH_KEYWORDS, ALL_METHODS_KEYWORDS),
         )
         print(f"    Found {len(arxiv_articles)} matching preprints")
     except Exception as e:
         print(f"    arXiv search failed ({e}), skipping")
+        failed.append("arXiv")
         arxiv_articles = []
 
     # Combine all preprints
@@ -189,6 +200,7 @@ def main():
                 db_biorxiv = medrxiv.search("biorxiv", days_back=7, keywords=db_keywords)
             except Exception as e:
                 print(f"    Weekly preprint search failed for {db_name} ({e}), skipping")
+                failed.append(f"preprints: {db_name}")
                 continue
 
             db_preprints = db_medrxiv + db_biorxiv
@@ -235,6 +247,7 @@ def main():
             print(f"    Found {len(grants)} new grants")
         except Exception as e:
             print(f"    NIH RePORTER search failed ({e}), skipping")
+            failed.append("NIH RePORTER")
             grants = []
         if grants:
             all_articles["NIH RePORTER (New Grants)"] = {
@@ -271,10 +284,11 @@ def main():
 
     if total == 0:
         print("No articles found. Skipping email.")
+        _exit_if_failed(failed)
         return
 
     # Build email
-    html = email_format.build(all_articles, date_str)
+    html = email_format.build(all_articles, date_str, failed_sources=failed)
 
     # Write HTML preview
     preview_path = os.path.join(os.path.dirname(__file__), "preview.html")
@@ -293,7 +307,17 @@ def main():
         dedup.save_history(history)
         print(f"Updated history: {len(history.get('articles', {}))} total articles")
     else:
-        print("GMAIL_APP_PASSWORD not set — skipping email send.")
+        print("GMAIL_APP_PASSWORD not set: skipping email send (preview only).")
+
+    # History is saved above BEFORE this exit, so items already emailed are not
+    # resent tomorrow even though the run is marked failed.
+    _exit_if_failed(failed)
+
+
+def _exit_if_failed(failed: list[str]) -> None:
+    if failed:
+        print(f"FAILED SOURCES: {', '.join(failed)}")
+        sys.exit(1)
 
 
 def classify_preprints(preprints: list[dict]) -> dict[str, list[dict]]:
@@ -316,12 +340,14 @@ def classify_preprints(preprints: list[dict]) -> dict[str, list[dict]]:
         ("Digital Phenotyping", METHODS_KEYWORDS_DIGIPHEN),
     ]
 
-    for preprint in preprints:
-        text = (preprint.get("title", "") + " " + preprint.get("abstract", "")).lower()
+    compiled = [(name, compile_all(kws)) for name, kws in subsection_keywords]
 
-        # Find first matching subsection
-        for subsection_name, keywords in subsection_keywords:
-            if any(kw.lower() in text for kw in keywords):
+    for preprint in preprints:
+        text = preprint.get("title", "") + " " + preprint.get("abstract", "")
+
+        # Find first matching subsection (acronyms match whole words only)
+        for subsection_name, patterns in compiled:
+            if matches_any(text, patterns):
                 result[subsection_name].append(preprint)
                 break  # Only assign to first matching subsection
 
@@ -341,7 +367,7 @@ def sort_within_subsection(articles: list[dict]) -> list[dict]:
     # Two-pass stable sort: first by date desc, then by IF desc
     # This ensures within same IF tier, newest articles come first
     peer_reviewed.sort(key=lambda a: a.get("date", ""), reverse=True)
-    peer_reviewed.sort(key=lambda a: -_JIF_LOOKUP.get(a.get("issn", ""), 0.0))
+    peer_reviewed.sort(key=lambda a: -email_format.jif_for(a))
 
     # Sort preprints by date (newest first)
     preprints.sort(key=lambda a: a.get("date", ""), reverse=True)

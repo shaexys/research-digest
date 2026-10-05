@@ -9,3 +9,6 @@ data/jif_lookup.json
 
 # Cross-day dedup state
 sent_history.json
+
+# JCR-derived ISSN whitelist (licensing): supplied via secret or local file
+data/issn_whitelist.txt

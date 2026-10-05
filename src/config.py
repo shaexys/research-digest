@@ -15,6 +15,8 @@ The two-layer design (module definitions here, alert strategies in ALERTS
 below) means you never touch API code in pubmed.py / medrxiv.py / etc.
 ═══════════════════════════════════════════════════════════════════════════
 """
+import os
+
 
 # ---------------------------------------------------------------------------
 # Journal filters
@@ -76,6 +78,16 @@ JOURNAL_TOP_PSYCH = (
 # See DESIGN.md > "ISSN whitelist" for rationale.
 
 _ISSN_LIST = ""  # e.g., "0028-4793|1533-4406|..."
+
+# Or keep the list out of the repo: data/issn_whitelist.txt (gitignored) or the
+# ISSN_WHITELIST environment variable, which the workflow fills from a GitHub
+# Actions secret. Either form is a pipe-separated string of ISSNs.
+_issn_file = os.path.join(os.path.dirname(__file__), "..", "data", "issn_whitelist.txt")
+if not _ISSN_LIST:
+    _ISSN_LIST = os.environ.get("ISSN_WHITELIST", "").strip()
+if not _ISSN_LIST and os.path.exists(_issn_file):
+    with open(_issn_file) as _f:
+        _ISSN_LIST = _f.read().strip()
 
 ISSN_WHITELIST = (
     " OR ".join(f'"{issn}"[ISSN]' for issn in _ISSN_LIST.split("|") if issn)
@@ -204,8 +216,13 @@ DATABASES = f"{DB_ABCD} OR {DB_EPIC_COSMOS} OR {DB_ALL_OF_US}"
 # Alert definitions (new 3-section architecture)
 # ---------------------------------------------------------------------------
 
-# All journals combined for Section 1
-_ALL_JOURNALS = f"({JOURNAL_TOP_MED}) OR ({JOURNAL_TOP_PSYCH}) OR ({JOURNAL_CLINICAL_INFORMATICS}) OR ({ISSN_WHITELIST})"
+# All journals combined for Section 1. The ISSN whitelist is NOT put in the
+# query: PubMed rejects queries with more than 2,048 Boolean operators (an
+# IF >= 7 list is ~4,500 ISSNs), and it reports the rejection inside an HTTP 200
+# response. Each Section 1 alert instead runs an "issn_query" without a journal
+# filter and keeps only articles whose ISSN is in ISSN_SET (see main.py).
+_ALL_JOURNALS = f"({JOURNAL_TOP_MED}) OR ({JOURNAL_TOP_PSYCH}) OR ({JOURNAL_CLINICAL_INFORMATICS})"
+ISSN_SET = {i.strip() for i in _ISSN_LIST.split("|") if i.strip()}
 
 # Section 3 journals (no ISSN whitelist - too many)
 _SECTION3_JOURNALS = f"({JOURNAL_TOP_MED}) OR ({JOURNAL_CLINICAL_INFORMATICS})"
@@ -221,6 +238,7 @@ ALERTS = [
     {
         "name": "EHR",
         "query": f"({_ALL_JOURNALS}) AND ({PSYCH}) AND ({EHR_METHODS})",
+        "issn_query": f"({PSYCH}) AND ({EHR_METHODS})",
         "days_back": 1,
         "priority": 1.1,
         "daily": True,
@@ -231,6 +249,7 @@ ALERTS = [
     {
         "name": "Wearables",
         "query": f"({_ALL_JOURNALS}) AND ({PSYCH}) AND ({WEARABLES_METHODS})",
+        "issn_query": f"({PSYCH}) AND ({WEARABLES_METHODS})",
         "days_back": 1,
         "priority": 1.2,
         "daily": True,
@@ -241,6 +260,7 @@ ALERTS = [
     {
         "name": "AI/ML",
         "query": f"({_ALL_JOURNALS}) AND ({PSYCH}) AND ({AI_METHODS})",
+        "issn_query": f"({PSYCH}) AND ({AI_METHODS})",
         "days_back": 1,
         "priority": 1.3,
         "daily": True,
@@ -251,6 +271,7 @@ ALERTS = [
     {
         "name": "Digital Phenotyping",
         "query": f"({_ALL_JOURNALS}) AND ({PSYCH}) AND ({DIGITAL_PHENOTYPING_METHODS})",
+        "issn_query": f"({PSYCH}) AND ({DIGITAL_PHENOTYPING_METHODS})",
         "days_back": 1,
         "priority": 1.4,
         "daily": True,

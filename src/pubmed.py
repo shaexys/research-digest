@@ -1,5 +1,6 @@
 """PubMed E-utilities search and fetch."""
 
+import re
 import os
 import time
 import xml.etree.ElementTree as ET
@@ -72,6 +73,10 @@ def search(query: str, days_back: int = 1) -> list[str]:
         )
         resp.raise_for_status()
         data = resp.json()["esearchresult"]
+        # PubMed reports query errors (e.g. "number of Boolean operators exceeds
+        # 2048") inside an HTTP 200 body; without this check they read as 0 hits.
+        if "ERROR" in data or "count" not in data:
+            raise RuntimeError(f"PubMed rejected the query: {data.get('ERROR', data)}")
         batch = data.get("idlist", [])
         pmids.extend(batch)
 
@@ -134,12 +139,10 @@ def _parse_xml(xml_text: str) -> list[dict]:
         journal_el = art.find("Journal/Title")
         journal = journal_el.text if journal_el is not None else ""
 
-        # ISSN (for Impact Factor lookup)
-        issn = ""
-        for issn_el in art.findall("Journal/ISSN"):
-            issn = issn_el.text or ""
-            if issn_el.get("IssnType") == "Electronic":
-                break  # prefer eISSN
+        # ISSNs (for Impact Factor lookup): keep print and electronic, since a
+        # JIF table may list a journal under either one
+        issns = [el.text.strip() for el in art.findall("Journal/ISSN") if el.text]
+        issn = issns[0] if issns else ""
 
         # Date — try ArticleDate first, then PubDate
         date_str = _extract_date(art)
@@ -163,6 +166,7 @@ def _parse_xml(xml_text: str) -> list[dict]:
                 "date": date_str,
                 "doi": doi,
                 "issn": issn,
+                "issns": issns,
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             }
         )
@@ -195,6 +199,12 @@ def _extract_date(art_el) -> str:
                 if day:
                     parts.append(day.zfill(2))
                 return "-".join(parts)
+            # Older or seasonal issues carry free text instead, e.g. "2024 Jan-Feb"
+            medline = d.findtext("MedlineDate", "")
+            m = re.match(r"(\d{4})(?:\s+([A-Za-z]{3}))?", medline)
+            if m:
+                month = MONTH_MAP.get((m.group(2) or "").lower(), "")
+                return f"{m.group(1)}-{month}" if month else m.group(1)
     return ""
 
 
