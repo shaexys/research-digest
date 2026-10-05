@@ -60,7 +60,7 @@ def search(server: str, days_back: int, keywords: list[str],
         all_papers.extend(papers)
         cursor += len(papers)
 
-        total = data.get("messages", [{}])[0].get("total", 0)
+        total = int(data.get("messages", [{}])[0].get("total", 0))  # API returns total as a string
         if cursor >= total:
             break
 
