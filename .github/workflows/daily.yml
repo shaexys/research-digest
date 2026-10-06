@@ -46,11 +46,23 @@ jobs:
       # repo: it lives in Actions secrets and is written to gitignored files here.
       - name: Write JCR-derived data from secrets
         env:
-          JIF_LOOKUP_JSON: ${{ secrets.JIF_LOOKUP_JSON }}
+          JIF_1: ${{ secrets.JIF_LOOKUP_GZ_1 }}
+          JIF_2: ${{ secrets.JIF_LOOKUP_GZ_2 }}
+          JIF_3: ${{ secrets.JIF_LOOKUP_GZ_3 }}
+          JIF_4: ${{ secrets.JIF_LOOKUP_GZ_4 }}
+          JIF_5: ${{ secrets.JIF_LOOKUP_GZ_5 }}
+          JIF_6: ${{ secrets.JIF_LOOKUP_GZ_6 }}
+          JIF_7: ${{ secrets.JIF_LOOKUP_GZ_7 }}
+          JIF_8: ${{ secrets.JIF_LOOKUP_GZ_8 }}
+        # The full lookup (~250 KB gzipped + base64) exceeds the 48 KB secret
+        # limit, so it is split across JIF_LOOKUP_GZ_1..8 and reassembled here.
         run: |
-          if [ -n "$JIF_LOOKUP_JSON" ]; then
-            printf '%s' "$JIF_LOOKUP_JSON" > data/jif_lookup.json
+          printf '%s' "$JIF_1$JIF_2$JIF_3$JIF_4$JIF_5$JIF_6$JIF_7$JIF_8" > /tmp/jif.b64
+          if [ -s /tmp/jif.b64 ]; then
+            base64 -d /tmp/jif.b64 | gunzip > data/jif_lookup.json
+            python -c "import json; print(len(json.load(open('data/jif_lookup.json'))), 'ISSNs in JIF lookup')"
           fi
+          rm -f /tmp/jif.b64
 
       - name: Run pipeline
         env:
