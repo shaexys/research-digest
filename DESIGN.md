@@ -1,4 +1,4 @@
-# Research Digest — Design
+# Research Digest: Design
 
 A lightweight, opinionated pipeline for literature discovery. Daily PubMed papers and preprints at 8am; weekly NIH grants and database-cohort papers on Sundays. One HTML email, filtered to your research focus.
 
@@ -59,40 +59,40 @@ Before the section-by-section details, a quick map of **what kinds of filters ar
 | **Named-journal whitelists** | `JOURNAL_TOP_MED`, `JOURNAL_TOP_PSYCH`, `JOURNAL_CLINICAL_INFORMATICS` | Hard-coded quality anchor. You trust papers in *Lancet* / *JAMA* / *BMJ* / your top field journals regardless of topic. Used in all PubMed sections. |
 | **IF-based ISSN whitelist** | `_ISSN_LIST` (IF ≥ your cutoff, from JCR) | Breadth extension. Catches high-quality work in specialized journals you didn't pre-list. Used only in Section 1 (where strong topic filter already anchors relevance). |
 | **Topic keyword modules** | `PSYCH` (domain), `EHR_METHODS` / `AI_METHODS` / `WEARABLES_METHODS` / ... | The substantive filter. Combines with journal filter via `AND` to get papers that are *both* in good journals *and* on your topic. Used in all sections. |
-| **Exclusion list** | `WET_LAB_TERMS` (mouse, rodent, GWAS, knockout, ...) | Safety net for the comprehensive positive filter. Catches items your broad keyword search pulls in but you know you don't want — e.g., an informatics researcher can exclude wildlife / marine terms; a clinical epi researcher excludes molecular biology terms. Currently used only in NIH RePORTER (where wet lab signal-to-noise is worst). |
+| **Exclusion list** | `WET_LAB_TERMS` (mouse, rodent, GWAS, knockout, ...) | Safety net for the comprehensive positive filter. Catches items your broad keyword search pulls in but you know you don't want: an informatics researcher might exclude wildlife or marine terms, and a clinical epidemiologist molecular biology terms. Currently used only in NIH RePORTER (where wet lab signal-to-noise is worst). |
 
-The `∪` (union) notation in each section's "Journals" line below means "any of these journal lists" — PubMed's `OR` operator combining the whitelists. The pipeline then layers topic keywords via `AND` on top.
+The `∪` (union) notation in each section's "Journals" line below means "any of these journal lists", that is, PubMed's `OR` operator combining the whitelists. The pipeline then layers topic keywords via `AND` on top.
 
-### Section 1 — Psych × Methods
+### Section 1: Psych × Methods
 
 ```
 Query:    (AllJournals) AND (Psych) AND (Methods_Subsection)
 Journals: TopMed ∪ TopPsych ∪ ClinicalInformatics ∪ ISSN_Whitelist (IF ≥ cutoff)
 Content:  4 subsections by methods type (EHR / Wearables / AI-ML / Digital Phenotyping)
-Preprint: Yes — medRxiv / bioRxiv / arXiv with Psych × Methods keywords
+Preprint: Yes (medRxiv / bioRxiv / arXiv with Psych × Methods keywords)
 Sorting:  IF descending, preprints last
 ```
 
 Section 1 is **the intersection**: papers at the overlap of your domain and your methods interest. These are the papers you're most likely to cite. Journal set is widest (including the ISSN whitelist) because signal is strong after the intersection filter.
 
-Throughout this document, section and variable names use the default template (psychiatry). When you fork for another field, the same structure applies — rename `PSYCH` to `CARDIO` / `NEURO` / etc. and relabel the sections accordingly.
+Throughout this document, section and variable names use the default template (psychiatry). When you fork for another field, the same structure applies: rename `PSYCH` to a name such as `CARDIO` and relabel the sections accordingly.
 
-### Section 2 — General Psychiatry
+### Section 2: General Psychiatry
 
 ```
 Query:    (TopPsych all) OR ((TopMed ∪ ClinicalInformatics) AND Psych)
 Journals: TopMed ∪ TopPsych ∪ ClinicalInformatics (no ISSN whitelist)
 Content:  Flat list, no subsections
-Preprint: No (volume too high without a methods filter — see note below)
+Preprint: No (volume too high without a methods filter; see note below)
 Dedup:    Against Section 1
 Sorting:  IF descending
 ```
 
-Section 2 catches **domain papers outside your methods focus**. Kept flat because sub-dividing a small daily volume fragments the list. ISSN whitelist dropped because top-tier domain journals already anchor quality — adding the whitelist here would swamp the section with tangential work.
+Section 2 catches **domain papers outside your methods focus**. Kept flat because sub-dividing a small daily volume fragments the list. ISSN whitelist dropped because top-tier domain journals already anchor quality, and adding the whitelist here would swamp the section with tangential work.
 
 **Preprints are excluded** because the domain-only filter (no methods intersection) matches too many medRxiv / bioRxiv papers per day to triage. Preprints are quality-variable; without the additional methods filter (as in Section 1), the email becomes unreadable.
 
-### Section 3 — General Methods
+### Section 3: General Methods
 
 ```
 Query:    (TopMed ∪ ClinicalInformatics) AND (Methods_Subsection)
@@ -103,11 +103,11 @@ Dedup:    Against Sections 1 + 2
 Sorting:  IF descending
 ```
 
-Section 3 captures **methods innovations from other fields**. A new EHR phenotyping method in oncology may transport to your domain — you want to see it, but only from quality medical journals (not the full whitelist, which would dilute the signal).
+Section 3 captures **methods innovations from other fields**. A new EHR phenotyping method in oncology may transport to your domain, so you want to see it, but only from quality medical journals (not the full whitelist, which would dilute the signal).
 
 Preprints excluded for the same reason as Section 2: without the domain intersection, the daily volume of methods preprints is too high for email triage.
 
-### Weekly — Research Databases
+### Weekly: Research Databases
 
 ```
 Query:    Database-specific keywords
@@ -118,12 +118,14 @@ Preprint: Yes
 
 Designed around **specific data sources** (public research databases, registries, cohorts). A weekly cadence suits these because daily volume is often 0-1.
 
-### Weekly — NIH RePORTER
+### Weekly: NIH RePORTER
 
 ```
-Query:    Institute_filter (e.g., NIMH all grants) OR Methods_Keywords (any institute)
-Filter:   newly_added_projects_only: true
-Exclude:  Wet lab terms (mouse, GWAS, cell line, knockout, etc.)
+Query:    NIMH (all grants) OR Topic_Keywords (any institute) OR Methods_Keywords (any institute)
+          keywords searched in title, terms and abstract
+Filter:   newly_added_projects_only: true; award types 1 (new) and 2 (competing renewal) only;
+          center-grant core units dropped
+Exclude:  Wet lab terms (mouse, GWAS, cell line, knockout, and others)
 Display:  Activity code (R01, K99), Institution, Start / award dates
 ```
 
@@ -148,7 +150,7 @@ EHR_METHODS = '"Electronic Health Records"[MeSH] OR ...'
 ALERTS = [{"query": f"({PSYCH}) AND ({EHR_METHODS})", ...}]
 ```
 
-Adding a new topic = add one module + reference it in alert definitions. You never touch the API code in `pubmed.py` / `medrxiv.py` / etc.
+Adding a new topic = add one module + reference it in alert definitions. You never touch the API code in `pubmed.py` or `medrxiv.py`.
 
 ### 2. POST for PubMed, not GET (handles long queries)
 
@@ -170,17 +172,17 @@ arXiv's API does not support `submittedDate` range with a `cat:` prefix. Workaro
 
 Roughly half of NIMH R01 grants are animal model / molecular biology. A 30-term exclusion list (`mouse`, `mice`, `rodent`, `GWAS`, `knockout`, `optogenetic`, ...) cuts that noise by ~60% without losing clinical epidemiology or informatics grants.
 
-Removed from the list because they over-trigger: `protein`, `blood sample`, `biospecimen`, `plasma level`. These appear in relevant work (e.g., biomarker prediction modeling).
+Removed from the list because they over-trigger: `protein`, `blood sample`, `biospecimen`, `plasma level`. These appear in relevant work such as biomarker prediction modeling.
 
 ### 6. Institute filter vs keyword filter (RePORTER)
 
-Query is `NIMH_all_grants OR Methods_Keywords_any_institute`. Rationale:
+Query is `NIMH_all_grants OR Topic_Keywords_any_institute OR Methods_Keywords_any_institute`. Rationale:
 
-- Psychiatry-related grants are clustered at NIMH — capturing the institute captures most domain work without needing keywords.
-- Methods/AI grants are distributed across NIMH, NLM, NHLBI, OD, etc. — captured via keyword OR.
+- Psychiatry-related grants are clustered at NIMH, so capturing the institute captures most domain work without keywords.
+- Methods and AI grants are spread across NIMH, NLM, NHLBI, OD and other institutes, so they are captured by keyword OR.
 - Since 2026-10-05 the query also ORs in whole-word domain terms (any institute), and all keyword queries search the abstract as well as title and terms, so domain grants outside NIMH and methods grants on adjacent topics (pediatric, perinatal) are both kept.
 - Only new awards (type 1) and competing renewals (type 2) are kept. RePORTER re-adds every multi-year grant each year as a non-competing continuation (type 5); those were 45 of 71 matches in one week. Center-grant sub-units ("Core A: Administrative Core") are dropped.
-- Measured 2026-10-05, at the fiscal-year-end award peak: ~70 grants/week. Recheck volume in a non-peak month before trimming further (e.g. by activity code).
+- Measured 2026-10-05, at the fiscal-year-end award peak: ~70 grants/week. Recheck volume in a non-peak month before trimming further, such as by activity code.
 
 ### 7. Gmail SMTP over SendGrid
 
@@ -200,24 +202,24 @@ Dedup cascade across sections: Section 1 → Section 2 → Section 3 → Weekly.
 
 In addition to within-email dedup, a persistent 7-day history file (`sent_history.json`) prevents the same paper from reappearing in subsequent daily emails. Cached across GitHub Actions runs via `actions/cache`.
 
-Why 7 days and not longer: papers from 8+ days ago can reappear if still relevant, which is intentional — catches slow-indexing journals and preprint-to-publication transitions.
+Why 7 days and not longer: papers from 8+ days ago can reappear if still relevant, which is intentional: it catches slow-indexing journals and preprint-to-publication transitions.
 
 ### 11. Preprints only in Section 1 (and Weekly Databases)
 
 Sections 2 and 3 are peer-reviewed only. Adding preprints to General Psychiatry or General Methods sections would flood the email: without the Psych × Methods intersection, medRxiv / bioRxiv / arXiv volumes are too high for morning triage, and preprints are quality-variable.
 
-Preprints belong where the filter is tightest (Section 1 — Psych × Methods intersection) and in the weekly database section (where filtering is by specific database name, so signal is already narrow).
+Preprints belong where the filter is tightest (Section 1, the Psych × Methods intersection) and in the weekly database section (where filtering is by specific database name, so signal is already narrow).
 
 ### 12. Daily vs weekly cadence
 
 - **Daily**: PubMed sections + preprints. New peer-reviewed papers show up continuously; daily polling catches them fresh.
 - **Weekly (Sunday)**: Research Databases + NIH RePORTER.
-  - *Research Databases* use very specific queries (e.g., `"UK Biobank"[tiab]`), so daily volume is often 0-1. Weekly batching keeps the weekend review readable.
+  - *Research Databases* use very specific queries such as `"UK Biobank"[tiab]`, so daily volume is often 0-1. Weekly batching keeps the weekend review readable.
   - *NIH RePORTER* updates grants in batches roughly weekly. Polling daily yields many empty days punctuated by large drops.
 
 ### 13. No AI summaries
 
-This is a deliberate design choice, not a missing feature. A human reading a journal-tagged title scans faster than reading an AI abstract — especially when the AI occasionally hallucinates. The pipeline optimizes for **triage density**, not depth.
+This is a deliberate design choice, not a missing feature. A human reading a journal-tagged title scans faster than reading an AI abstract, especially when the AI occasionally hallucinates. The pipeline optimizes for **triage density**, not depth.
 
 ---
 
@@ -225,9 +227,9 @@ This is a deliberate design choice, not a missing feature. A human reading a jou
 
 ### Purpose
 
-Section 1 uses a large ISSN whitelist (e.g., journals with IF ≥ 7) as an **inclusive journal filter**. This catches high-quality work in specialized journals (e.g., statistics methods journals, specific clinical subfields) that wouldn't be in your top-tier lists.
+Section 1 uses a large ISSN whitelist (such as journals with IF ≥ 7) as an **inclusive journal filter**. This catches high-quality work in specialized journals (statistics methods journals, specific clinical subfields) that wouldn't be in your top-tier lists.
 
-Sections 2 and 3 intentionally do **not** use this whitelist — their top-tier lists are already sufficient.
+Sections 2 and 3 intentionally do **not** use this whitelist; their top-tier lists are already sufficient.
 
 ### Licensing note
 
@@ -235,8 +237,8 @@ Journal Impact Factor data comes from Clarivate JCR, which prohibits redistribut
 
 If you have access to JCR (typically through a university library subscription):
 
-1. Go to https://jcr.clarivate.com/jcr/browse-journals → Sign In with your institution's SSO (the exact path varies — your library's Databases page usually links to JCR or Web of Science).
-2. Apply a JIF filter (e.g., ≥ 7) and Export the filtered list. JCR Export has a per-session row limit — if your filtered set exceeds it, either raise the cutoff or export in batches (by IF band, Category, or Edition).
+1. Go to https://jcr.clarivate.com/jcr/browse-journals → Sign In with your institution's SSO (the exact path varies; your library's Databases page usually links to JCR or Web of Science).
+2. Apply a JIF filter (such as ≥ 7) and Export the filtered list. JCR Export has a per-session row limit; if your filtered set exceeds it, either raise the cutoff or export in batches (by IF band, Category, or Edition).
 3. Save the CSV / Excel anywhere locally.
 4. Either:
     - **Use the Claude Code skill** (`research-digest-setup`) → hand it the file path → it auto-parses ISSN + JIF columns and writes both `_ISSN_LIST` in `src/config.py` and `data/jif_lookup.json`.
@@ -257,7 +259,7 @@ Same principle applies to `jif_lookup.json` (the per-ISSN IF values rendered as 
 | Cross-day | Persistent 7-day history file prevents repeat sends across daily runs. |
 | Matching | DOI exact match first; fuzzy title (Levenshtein ≥ 92% similarity) as fallback. |
 
-The 7-day history file is cached across GitHub Actions runs via `actions/cache`. Articles from 8+ days ago can reappear if they're still relevant — this is intentional (surfaces slow-indexing journals and preprint-to-publication transitions).
+The 7-day history file is cached across GitHub Actions runs via `actions/cache`. Articles from 8+ days ago can reappear if they're still relevant, which is intentional (it surfaces slow-indexing journals and preprint-to-publication transitions).
 
 ---
 
@@ -275,7 +277,7 @@ The 7-day history file is cached across GitHub Actions runs via `actions/cache`.
 - **Scopus / Web of Science:** paid APIs, not useful for a free template.
 - **Google Scholar:** no public API, scraping is fragile and ToS-problematic.
 - **Semantic Scholar:** excellent but overlaps heavily with PubMed for clinical work, adds dedup complexity.
-- **ClinicalTrials.gov:** not a journal source, different triage cadence — would belong in a separate weekly section if added.
+- **ClinicalTrials.gov:** not a journal source and has a different triage cadence, so it would belong in a separate weekly section if added.
 
 ---
 
@@ -301,7 +303,7 @@ This pipeline does **not**:
 - Rank by a "relevance score" beyond journal IF.
 - Track which papers you've opened or saved.
 - Integrate with Zotero, Mendeley, or any reference manager.
-- Notify you in real-time — it's a daily batch.
+- Notify you in real time; it runs as a daily batch.
 
 These are deliberate omissions. If you want these features, this pipeline is the wrong starting point. If the simplicity resonates, fork away.
 
