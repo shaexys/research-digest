@@ -178,6 +178,9 @@ Query is `NIMH_all_grants OR Methods_Keywords_any_institute`. Rationale:
 
 - Psychiatry-related grants are clustered at NIMH — capturing the institute captures most domain work without needing keywords.
 - Methods/AI grants are distributed across NIMH, NLM, NHLBI, OD, etc. — captured via keyword OR.
+- Since 2026-10-05 the query also ORs in whole-word domain terms (any institute), and all keyword queries search the abstract as well as title and terms, so domain grants outside NIMH and methods grants on adjacent topics (pediatric, perinatal) are both kept.
+- Only new awards (type 1) and competing renewals (type 2) are kept. RePORTER re-adds every multi-year grant each year as a non-competing continuation (type 5); those were 45 of 71 matches in one week. Center-grant sub-units ("Core A: Administrative Core") are dropped.
+- Measured 2026-10-05, at the fiscal-year-end award peak: ~70 grants/week. Recheck volume in a non-peak month before trimming further (e.g. by activity code).
 
 ### 7. Gmail SMTP over SendGrid
 

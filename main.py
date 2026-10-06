@@ -66,6 +66,8 @@ ALL_METHODS_KEYWORDS = (
 # NIH RePORTER: Methods keywords (searched across all institutes)
 # Logic: NIMH (all grants) OR Methods_Keywords (any institute)
 REPORTER_METHODS_KEYWORDS = ALL_METHODS_KEYWORDS
+# Topic side of the OR: whole-word psych terms (RePORTER does not stem)
+REPORTER_TOPIC_KEYWORDS = arxiv.DEFAULT_API_TERMS
 
 
 def main():
@@ -243,9 +245,10 @@ def main():
     # Step 6: NIH RePORTER (weekly, Sundays only)
     # ---------------------------------------------------------------------------
     if is_sunday:
-        print("  Searching: NIH RePORTER (NIMH + Methods)")
+        print("  Searching: NIH RePORTER (NIMH + Methods + Topic; new and competing awards)")
         try:
-            grants = reporter.search(REPORTER_METHODS_KEYWORDS, nimh_all=True)
+            grants = reporter.search(REPORTER_METHODS_KEYWORDS, nimh_all=True,
+                                     topic_keywords=REPORTER_TOPIC_KEYWORDS)
             print(f"    Found {len(grants)} new grants")
         except Exception as e:
             print(f"    NIH RePORTER search failed ({e}), skipping")

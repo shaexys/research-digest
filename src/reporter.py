@@ -21,14 +21,30 @@ WET_LAB_TERMS = [
 ]
 
 
+# Award types kept: 1 = new award, 2 = competing renewal (re-reviewed to
+# continue). Type 5, the yearly non-competing continuation of a multi-year
+# grant, is re-added to RePORTER every year and was 45 of 71 matches on
+# 2026-10-05, so it is dropped.
+KEPT_AWARD_TYPES = {"1", "2"}
+
+# Sub-units of center grants (e.g. "Core A: Administrative Core") are not
+# separate research projects.
+_CORE_UNIT = re.compile(r"^\s*(core|admin\w*)\b", re.IGNORECASE)
+
+SEARCH_FIELDS = "projecttitle,terms,abstracttext"
+
+
 def search(keywords: list[str], fiscal_years: list[int] = None,
-           nimh_all: bool = False) -> list[dict]:
+           nimh_all: bool = False, topic_keywords: list[str] | None = None) -> list[dict]:
     """Search NIH RePORTER for grants.
 
-    Logic: NIMH (all grants) OR Methods_Keywords (any institute)
+    Logic: NIMH (all grants) OR Methods keywords OR Topic keywords (any
+    institute), searched in title, terms and abstract; new awards and
+    competing renewals only (KEPT_AWARD_TYPES).
 
     Args:
         keywords: search terms for Methods (OR logic)
+        topic_keywords: whole-word domain terms, searched as a second OR query
         fiscal_years: fiscal years to search (default: previous + current NIH
             fiscal year; see current_fiscal_years)
         nimh_all: if True, also fetch all NIMH grants without keyword filter
@@ -41,19 +57,20 @@ def search(keywords: list[str], fiscal_years: list[int] = None,
 
     all_results = {}
 
-    # Query 1: Methods keywords (any institute)
-    if keywords:
+    # Query 1: Methods keywords, Query 1b: Topic keywords (any institute)
+    for terms in (keywords, topic_keywords):
+        if not terms:
+            continue
         criteria1 = {
             "advanced_text_search": {
                 "operator": "or",
-                "search_field": "projecttitle,terms",
-                "search_text": _or_text(keywords),
+                "search_field": SEARCH_FIELDS,
+                "search_text": _or_text(terms),
             },
             "fiscal_years": fiscal_years,
             "newly_added_projects_only": True,
         }
-        results1 = _fetch_and_filter(criteria1)
-        for r in results1:
+        for r in _fetch_and_filter(criteria1):
             all_results[r.get("_appl_id", r["title"])] = r
 
     # Query 2: NIMH (all grants, no keyword filter)
@@ -124,6 +141,10 @@ def _fetch_and_filter(criteria: dict) -> list[dict]:
         text = f"{title} {terms} {abstract}"
 
         if any(pat.search(text) for pat in exclude_pats):
+            continue
+        if str(proj.get("award_type") or "") not in KEPT_AWARD_TYPES:
+            continue
+        if _CORE_UNIT.search(title):
             continue
 
         results.append(_to_article(proj))
