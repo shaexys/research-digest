@@ -159,6 +159,11 @@ def filter_against_history(
     return result
 
 
+def sent_on(history: dict, date_str: str) -> bool:
+    """True if any article in history was sent on date_str (YYYY-MM-DD)."""
+    return any(v.startswith(date_str) for v in history.get("articles", {}).values())
+
+
 def update_history(
     all_articles: dict[str, list[dict]], history: dict
 ) -> dict:

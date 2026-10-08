@@ -72,6 +72,7 @@ jobs:
           NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
           ISSN_WHITELIST: ${{ secrets.ISSN_WHITELIST }}
           DAYS_BACK: ${{ github.event.inputs.days_back }}
+          BACKUP_RUN: ${{ github.event.schedule == '30 11 * * *' && '1' || '' }}
         run: python main.py
 
       # Saved even when the run fails: main.py writes history right after a

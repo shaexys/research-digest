@@ -97,6 +97,13 @@ def main():
     history = dedup.cleanup_old_history(history)
     print(f"Loaded history: {len(history.get('articles', {}))} articles from past 7 days")
 
+    # The backup cron exists only for days the runner pool drops the primary.
+    # When the primary already sent today, there is nothing to recover, and
+    # re-querying sources would only turn a transient outage into a false alarm.
+    if os.environ.get("BACKUP_RUN") == "1" and dedup.sent_on(history, date_str):
+        print("Backup run: digest already sent today. Nothing to do.")
+        return
+
     # Determine active alerts
     active = [a for a in config.ALERTS if a["daily"] or (a["sunday_only"] and is_sunday)]
 
