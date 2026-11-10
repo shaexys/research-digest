@@ -184,7 +184,7 @@ To use it in GitHub Actions without committing it, store it as secrets. A single
 - **arXiv preprints are filtered locally,** because the API cannot combine date range, category and keyword; a busy day pulls many papers before filtering.
 - **No historical backfill.** The first run returns only the current day. To recover a missed day, trigger the workflow manually with `days_back` set to 2 or more; already-sent papers are skipped.
 - **Preprint matching is deliberately loose.** medRxiv uses OR matching (topic or method), so Section 1 preprints include method papers outside the topic; bioRxiv uses AND. See [DESIGN.md](DESIGN.md).
-- **Failures are reported, not swallowed.** A source that errors is named in a banner at the top of the email (or in a short failure email if nothing else arrived), and the run is marked failed so GitHub notifies you.
+- **Failures are retried, then reported.** A source that errors is retried up to three times, 10 minutes apart, before the email goes out; one still failing is named in a banner at the top of the email (or in a short failure email if nothing else arrived). The run is marked failed, so GitHub notifies you, only when no digest with content was sent.
 - **Scheduled workflows stop after 60 days without commits.** The workflow makes an empty keepalive commit on the 1st of each month to prevent this.
 
 ---

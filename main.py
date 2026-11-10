@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import sys
+import time
 from collections import OrderedDict
 
 from src import config, pubmed, dedup, email_format, send, medrxiv, arxiv, reporter
@@ -69,6 +70,38 @@ REPORTER_METHODS_KEYWORDS = ALL_METHODS_KEYWORDS
 # Topic side of the OR: whole-word psych terms (RePORTER does not stem)
 REPORTER_TOPIC_KEYWORDS = arxiv.DEFAULT_API_TERMS
 
+# A source that errors is retried later in the same run before the email goes
+# out: most failures are a transient API timeout (bioRxiv, 2026-11-10), and a
+# digest sent with a hole cannot be patched afterwards because the daily window
+# is one day. Only a source still failing after the last attempt is named in
+# the email banner.
+RETRY_ATTEMPTS = 3
+RETRY_WAIT_SECONDS = int(os.environ.get("RETRY_WAIT_SECONDS", "600"))
+
+
+def fetch_with_retry(tasks, attempts=RETRY_ATTEMPTS, wait=RETRY_WAIT_SECONDS, sleep=time.sleep):
+    """Run each task; re-run only the failed ones after `wait` seconds, up to
+    `attempts` rounds. tasks: OrderedDict key -> (label, zero-arg fn).
+    Returns (results by key, labels still failing after the last round)."""
+    results, pending = {}, list(tasks)
+    for attempt in range(1, attempts + 1):
+        still = []
+        for key in pending:
+            label, fn = tasks[key]
+            try:
+                results[key] = fn()
+            except Exception as e:
+                print(f"    {label} failed on attempt {attempt}/{attempts} ({e})")
+                still.append(key)
+        pending = still
+        if not pending:
+            break
+        if attempt < attempts:
+            names = ", ".join(tasks[k][0] for k in pending)
+            print(f"  Retrying in {wait}s: {names}")
+            sleep(wait)
+    return results, [tasks[k][0] for k in pending]
+
 
 def main():
     today = datetime.date.today()
@@ -83,8 +116,10 @@ def main():
         print(f"DAYS_BACK override: daily window = {days_override} day(s)")
     daily_days = days_override or 1
 
-    # Every source that errors is recorded here, named in the email banner, and
-    # turns the run red (exit 1) so GitHub sends a failure notice.
+    # Every source still failing after the retries is recorded here and named in
+    # the email banner. The run turns red (exit 1, GitHub's failure notice) only
+    # when no digest with content went out (Xinyi 2026-11-10: a partial failure
+    # is already stated in the email; a second notice for it is noise).
     failed: list[str] = []
 
     # Load history for cross-day dedup
@@ -116,11 +151,10 @@ def main():
     # ---------------------------------------------------------------------------
     # Step 1: Fetch PubMed articles for each alert
     # ---------------------------------------------------------------------------
-    all_articles: OrderedDict[str, dict] = OrderedDict()
-    for alert in active:
-        days = max(alert["days_back"], days_override or 0)
-        print(f"  Searching: {alert['name']} (days_back={days})")
-        try:
+    def pubmed_task(alert):
+        def run():
+            days = max(alert["days_back"], days_override or 0)
+            print(f"  Searching: {alert['name']} (days_back={days})")
             pmids = pubmed.search(alert["query"], days_back=days)
             print(f"    Found {len(pmids)} PMIDs")
             articles = pubmed.fetch(pmids)
@@ -131,12 +165,49 @@ def main():
                 kept = [a for a in extra if config.ISSN_SET & set(a.get("issns") or [])]
                 print(f"    ISSN whitelist: {len(kept)} of {len(extra)} unfiltered articles kept")
                 articles.extend(kept)
-        except Exception as e:
-            print(f"    PubMed search failed for {alert['name']} ({e}), skipping")
-            failed.append(f"PubMed: {alert.get('display_name', alert['name'])}")
-            articles = []
+            return articles
+        return run
+
+    # For medRxiv: match any keyword (broader — medRxiv is already clinical)
+    MEDRXIV_KEYWORDS = PSYCH_KEYWORDS + ALL_METHODS_KEYWORDS
+
+    def logged(name, fn):
+        def run():
+            print(f"  Searching: {name}")
+            out = fn()
+            print(f"    Found {len(out)} matching items")
+            return out
+        return run
+
+    tasks = OrderedDict()
+    for alert in active:
+        tasks[("pubmed", alert["name"])] = (
+            f"PubMed: {alert.get('display_name', alert['name'])}", pubmed_task(alert))
+    tasks["medrxiv"] = ("medRxiv", logged("medRxiv preprints", lambda: medrxiv.search(
+        "medrxiv", days_back=daily_days, keywords=MEDRXIV_KEYWORDS)))
+    tasks["biorxiv"] = ("bioRxiv", logged("bioRxiv preprints", lambda: medrxiv.search(
+        "biorxiv", days_back=daily_days, keywords=[],
+        require_both=(PSYCH_KEYWORDS, ALL_METHODS_KEYWORDS))))
+    tasks["arxiv"] = ("arXiv", logged("arXiv (cs.AI, cs.CL, cs.LG, stat.ML, cs.HC)", lambda: arxiv.search(
+        days_back=daily_days, require_both=(PSYCH_KEYWORDS, ALL_METHODS_KEYWORDS))))
+    if is_sunday:
+        for db_name, db_keywords in config.DATABASE_KEYWORDS.items():
+            for server, label in (("medrxiv", "medRxiv"), ("biorxiv", "bioRxiv")):
+                tasks[("db", db_name, server)] = (f"{label} ({db_name})", logged(
+                    f"weekly {label} for {db_name}",
+                    lambda server=server, kw=db_keywords: medrxiv.search(server, days_back=7, keywords=kw)))
+        tasks["reporter"] = ("NIH RePORTER", logged(
+            "NIH RePORTER (NIMH + Methods + Topic; new and competing awards)",
+            lambda: reporter.search(REPORTER_METHODS_KEYWORDS, nimh_all=True,
+                                    topic_keywords=REPORTER_TOPIC_KEYWORDS)))
+
+    results, still_failed = fetch_with_retry(tasks)
+    failed.extend(still_failed)
+
+    all_articles: OrderedDict[str, dict] = OrderedDict()
+    for alert in active:
         all_articles[alert["name"]] = {
-            "articles": articles,
+            "articles": results.get(("pubmed", alert["name"]), []),
             "section": alert.get("section"),
             "priority": alert["priority"],
             "subsection_order": alert.get("subsection_order", 0),
@@ -146,41 +217,9 @@ def main():
     # ---------------------------------------------------------------------------
     # Step 2: Fetch preprints (daily only)
     # ---------------------------------------------------------------------------
-    # For medRxiv: match any keyword (broader — medRxiv is already clinical)
-    MEDRXIV_KEYWORDS = PSYCH_KEYWORDS + ALL_METHODS_KEYWORDS
-
-    print("  Searching: medRxiv preprints")
-    try:
-        medrxiv_articles = medrxiv.search("medrxiv", days_back=daily_days, keywords=MEDRXIV_KEYWORDS)
-        print(f"    Found {len(medrxiv_articles)} matching preprints")
-    except Exception as e:
-        print(f"    medRxiv search failed ({e}), skipping")
-        failed.append("medRxiv")
-        medrxiv_articles = []
-
-    print("  Searching: bioRxiv preprints")
-    try:
-        biorxiv_articles = medrxiv.search(
-            "biorxiv", days_back=daily_days, keywords=[],
-            require_both=(PSYCH_KEYWORDS, ALL_METHODS_KEYWORDS),
-        )
-        print(f"    Found {len(biorxiv_articles)} matching preprints")
-    except Exception as e:
-        print(f"    bioRxiv search failed ({e}), skipping")
-        failed.append("bioRxiv")
-        biorxiv_articles = []
-
-    print("  Searching: arXiv (cs.AI, cs.CL, cs.LG, stat.ML, cs.HC)")
-    try:
-        arxiv_articles = arxiv.search(
-            days_back=daily_days,
-            require_both=(PSYCH_KEYWORDS, ALL_METHODS_KEYWORDS),
-        )
-        print(f"    Found {len(arxiv_articles)} matching preprints")
-    except Exception as e:
-        print(f"    arXiv search failed ({e}), skipping")
-        failed.append("arXiv")
-        arxiv_articles = []
+    medrxiv_articles = results.get("medrxiv", [])
+    biorxiv_articles = results.get("biorxiv", [])
+    arxiv_articles = results.get("arxiv", [])
 
     # Combine all preprints
     all_preprints = medrxiv_articles + biorxiv_articles + arxiv_articles
@@ -204,15 +243,8 @@ def main():
     # ---------------------------------------------------------------------------
     if is_sunday:
         for db_name, db_keywords in config.DATABASE_KEYWORDS.items():
-            db_found = {}
-            for server, label in (("medrxiv", "medRxiv"), ("biorxiv", "bioRxiv")):
-                try:
-                    db_found[server] = medrxiv.search(server, days_back=7, keywords=db_keywords)
-                except Exception as e:
-                    print(f"    Weekly {label} search failed for {db_name} ({e}), skipping")
-                    failed.append(f"{label} ({db_name})")
-                    db_found[server] = []
-            db_medrxiv, db_biorxiv = db_found["medrxiv"], db_found["biorxiv"]
+            db_medrxiv = results.get(("db", db_name, "medrxiv"), [])
+            db_biorxiv = results.get(("db", db_name, "biorxiv"), [])
 
             db_preprints = db_medrxiv + db_biorxiv
             if db_name in all_articles and db_preprints:
@@ -252,15 +284,7 @@ def main():
     # Step 6: NIH RePORTER (weekly, Sundays only)
     # ---------------------------------------------------------------------------
     if is_sunday:
-        print("  Searching: NIH RePORTER (NIMH + Methods + Topic; new and competing awards)")
-        try:
-            grants = reporter.search(REPORTER_METHODS_KEYWORDS, nimh_all=True,
-                                     topic_keywords=REPORTER_TOPIC_KEYWORDS)
-            print(f"    Found {len(grants)} new grants")
-        except Exception as e:
-            print(f"    NIH RePORTER search failed ({e}), skipping")
-            failed.append("NIH RePORTER")
-            grants = []
+        grants = results.get("reporter", [])
         if grants:
             all_articles["NIH RePORTER (New Grants)"] = {
                 "articles": grants,
@@ -302,8 +326,8 @@ def main():
         html = email_format.failure_notice(date_str, failed)
         if os.environ.get("GMAIL_APP_PASSWORD"):
             send.send_email(html, f"\u26a0\ufe0f {date_str}: sources failed")
-        _exit_if_failed(failed)
-        return
+        print(f"FAILED SOURCES (nothing else arrived): {', '.join(failed)}")
+        sys.exit(1)
 
     # Build email
     html = email_format.build(all_articles, date_str, failed_sources=failed)
@@ -327,15 +351,9 @@ def main():
     else:
         print("GMAIL_APP_PASSWORD not set: skipping email send (preview only).")
 
-    # History is saved above BEFORE this exit, so items already emailed are not
-    # resent tomorrow even though the run is marked failed.
-    _exit_if_failed(failed)
-
-
-def _exit_if_failed(failed: list[str]) -> None:
     if failed:
-        print(f"FAILED SOURCES: {', '.join(failed)}")
-        sys.exit(1)
+        # Partial failure: named in the email banner; the run stays green.
+        print(f"PARTIAL: sources missing from today's digest: {', '.join(failed)}")
 
 
 def classify_preprints(preprints: list[dict]) -> dict[str, list[dict]]:

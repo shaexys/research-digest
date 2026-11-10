@@ -22,7 +22,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45   # up to 3 rounds of source retries 10 min apart (main.py RETRY_*)
     steps:
       - uses: actions/checkout@v7
         with:
